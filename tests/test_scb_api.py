@@ -1,6 +1,9 @@
 from unittest.mock import Mock, patch
 
-from scb_data.scb_api import get_population_data
+from scb_data.scb_api import (
+    get_population_data,
+    batch_values
+)
 
 
 def test_get_population_data():
@@ -31,3 +34,21 @@ def test_get_population_data():
             "outputValues[Alder]": "aggregated",
         },
     )
+
+def test_batch_values_even_batches(): 
+    values = list(range(10)) 
+    result = batch_values(values, batch_size=5) 
+    assert result == [
+        [0, 1, 2, 3, 4],
+        [5, 6, 7, 8, 9]
+    ]
+
+def test_batch_values_with_remainder(): 
+    values = list(range(10))
+    result = batch_values(values, batch_size=4) 
+    assert result == [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9]
+    ]
+

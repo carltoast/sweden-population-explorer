@@ -86,3 +86,4 @@ def test_load_population_data():
     mock_insert.assert_called_once()
 
     pd.testing.assert_frame_equal(result, mock_insert.call_args.args[0])
+

@@ -1,3 +1,4 @@
 requests
 pandas
 pytest
+psycopg[binary]

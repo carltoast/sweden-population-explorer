@@ -8,6 +8,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: scb_test
+          POSTGRES_USER: scb
+          POSTGRES_PASSWORD: development
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scb -d scb_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -16,4 +31,4 @@ jobs:
         run: docker build -t scb-project .
 
       - name: Run tests in Docker
-        run: docker run --rm scb-project
+        run: docker run --rm --network host scb-project

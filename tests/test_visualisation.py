@@ -1,9 +1,12 @@
+"""Tests for scb_data.visualisation."""
+
 import pandas as pd
 import plotly.graph_objects as go
 
 from scb_data.visualisation import (
     add_municipality_boundaries,
     create_population_map,
+    create_population_pyramid,
     prepare_geojson,
 )
 
@@ -105,11 +108,12 @@ def test_prepare_geojson_does_not_modify_original():
         ],
     }
 
-    original_ring = geojson["features"][0]["geometry"]["coordinates"][0].copy()
+    original_geometry = geojson["features"][0]["geometry"]
+    original_ring = original_geometry["coordinates"][0].copy()
 
     prepare_geojson(geojson)
 
-    assert geojson["features"][0]["geometry"]["coordinates"][0] == original_ring
+    assert original_geometry["coordinates"][0] == original_ring
 
 
 def test_prepare_geojson_preserves_feature_properties():
@@ -260,8 +264,8 @@ def test_add_municipality_boundaries_skips_unsupported_geometry():
 def test_create_population_map_returns_figure():
     data = pd.DataFrame(
         {
-            "municipality_code": ["1480", "0180"],
-            "municipality_name": ["Göteborg", "Stockholm"],
+            "region_code": ["1480", "0180"],
+            "region": ["Göteborg", "Stockholm"],
             "population": [608993, 995574],
         }
     )
@@ -312,8 +316,8 @@ def test_create_population_map_returns_figure():
 def test_create_population_map_contains_choropleth_and_boundaries():
     data = pd.DataFrame(
         {
-            "municipality_code": ["1480"],
-            "municipality_name": ["Göteborg"],
+            "region_code": ["1480"],
+            "region": ["Göteborg"],
             "population": [608993],
         }
     )
@@ -350,8 +354,8 @@ def test_create_population_map_contains_choropleth_and_boundaries():
 def test_create_population_map_uses_population_data():
     data = pd.DataFrame(
         {
-            "municipality_code": ["1480"],
-            "municipality_name": ["Göteborg"],
+            "region_code": ["1480"],
+            "region": ["Göteborg"],
             "population": [608993],
         }
     )
@@ -389,8 +393,8 @@ def test_create_population_map_uses_population_data():
 def test_create_population_map_uses_municipality_code_as_feature_id():
     data = pd.DataFrame(
         {
-            "municipality_code": ["1480"],
-            "municipality_name": ["Göteborg"],
+            "region_code": ["1480"],
+            "region": ["Göteborg"],
             "population": [608993],
         }
     )
@@ -422,3 +426,75 @@ def test_create_population_map_uses_municipality_code_as_feature_id():
     choropleth = fig.data[0]
 
     assert choropleth.featureidkey == "properties.id"
+
+
+def _population_pyramid_fixture():
+    return pd.DataFrame(
+        {
+            "age_code": ["-9", "-9", "10-19", "10-19"],
+            "age_group": [
+                "0–9 years", "0–9 years", "10–19 years", "10–19 years",
+            ],
+            "sex_code": ["1", "2", "1", "2"],
+            "sex": ["men", "women", "men", "women"],
+            "population": [100, 90, 200, 210],
+        }
+    )
+
+
+def test_create_population_pyramid_returns_figure():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 2
+    assert all(isinstance(trace, go.Bar) for trace in fig.data)
+
+
+def test_create_population_pyramid_male_bars_extend_left():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    male_trace = next(trace for trace in fig.data if trace.name == "Male")
+
+    assert list(male_trace.x) == [-100, -200]
+
+
+def test_create_population_pyramid_female_bars_extend_right():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    female_trace = next(trace for trace in fig.data if trace.name == "Female")
+
+    assert list(female_trace.x) == [90, 210]
+
+
+def test_create_population_pyramid_tick_labels_have_no_negative_sign():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    assert all("-" not in label for label in fig.layout.xaxis.ticktext)
+
+
+def test_create_population_pyramid_tick_values_are_symmetric():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    tick_values = list(fig.layout.xaxis.tickvals)
+
+    assert tick_values == sorted(tick_values)
+    assert tick_values[0] == -tick_values[-1]
+    assert 0 in tick_values
+
+
+def test_create_population_pyramid_handles_missing_sex():
+    data = pd.DataFrame(
+        {
+            "age_code": ["-9"],
+            "age_group": ["0–9 years"],
+            "sex_code": ["1"],
+            "sex": ["men"],
+            "population": [100],
+        }
+    )
+
+    fig = create_population_pyramid(data)
+
+    female_trace = next(trace for trace in fig.data if trace.name == "Female")
+
+    assert list(female_trace.x) == [0]

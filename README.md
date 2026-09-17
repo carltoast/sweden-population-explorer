@@ -1,8 +1,6 @@
 # SCB Data Pipeline
 
-A Python data pipeline for retrieving regional population data from Statistics Sweden (SCB), transforming it, and storing it in PostgreSQL for analysis and visualization.
-
-The project currently focuses on building a reliable data pipeline and exploring how the available SCB data can be used in a small analytical application.
+A Python data pipeline for retrieving regional population data from Statistics Sweden (SCB), transforming it, and storing it in PostgreSQL, plus an interactive Dash application for exploring that data geographically.
 
 ## Current pipeline
 
@@ -25,17 +23,18 @@ PostgreSQL
 Analysis
    │
    ▼
-Plotly visualization
+Interactive Dash app
 ```
 
 The current dataset contains monthly population data by Swedish municipality, age group and sex.
 
-The project also includes municipality geometry data in GeoJSON format, which is used to create geographic visualizations.
+The project also includes municipality geometry data in GeoJSON format, which is used to connect population data to geographic locations.
 
 ## Technologies
 
 * Python
 * pandas
+* Dash / dash-leaflet
 * Plotly
 * PostgreSQL
 * psycopg
@@ -55,6 +54,7 @@ scb-project/
 ├── src/
 │   └── scb_data/
 │       ├── database.py
+│       ├── geography.py
 │       ├── jsonstat.py
 │       ├── population.py
 │       ├── queries.py
@@ -63,11 +63,13 @@ scb-project/
 ├── tests/
 │   ├── conftest.py
 │   ├── test_database.py
+│   ├── test_geography.py
 │   ├── test_jsonstat.py
 │   ├── test_population.py
 │   ├── test_queries.py
 │   ├── test_scb_api.py
 │   └── test_visualisation.py
+├── app.py
 ├── Dockerfile
 ├── compose.yaml
 ├── pyproject.toml
@@ -86,25 +88,25 @@ The current pipeline uses SCB's table:
 
 The data covers Swedish municipalities and monthly observations.
 
-Municipality geometry is stored separately as GeoJSON and is used to connect the population data to geographic visualizations through municipality codes.
+Municipality geometry is stored separately as GeoJSON and is used to connect the population data to geographic locations through municipality codes.
 
-## Visualization
+## Interactive application
 
-The project currently includes a Plotly-based choropleth map showing population by Swedish municipality.
+`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically:
 
-The visualization:
+* A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
+* A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
+* Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed.
+* A population pyramid (male/female by age group) is shown for the combined population of those municipalities.
+* A year slider - with play/pause - moves through every year of data available (2000-2024), animating the pyramid over time.
 
-* Uses municipality codes to connect population data with geographic features.
-* Displays population using a continuous colour scale.
-* Shows municipality boundaries.
-* Supports municipality names and population values on hover.
-* Handles both Polygon and MultiPolygon municipality geometries.
+Run it locally with:
 
-The visualization is implemented in:
-
-```text
-src/scb_data/visualisation.py
+```bash
+python app.py
 ```
+
+`src/scb_data/visualisation.py` also includes a Plotly choropleth map (`create_population_map`) showing population by municipality on a colour scale; it is tested independently and not currently wired into `app.py`.
 
 ## Running locally
 
@@ -148,13 +150,21 @@ python run_pipeline.py
 
 This retrieves the configured SCB population data, transforms it, and loads it into PostgreSQL.
 
-### 4. Run the tests
+### 4. Run the interactive app
+
+```bash
+python app.py
+```
+
+See [Interactive application](#interactive-application) above.
+
+### 5. Run the tests
 
 ```bash
 pytest
 ```
 
-The tests include unit tests for the data-processing and visualization modules as well as database integration tests.
+The tests include unit tests for the data-processing, geography, and visualization modules, as well as database integration tests.
 
 The database tests use a separate PostgreSQL database named `scb_test`.
 
@@ -184,9 +194,15 @@ The project currently provides:
 * PostgreSQL storage
 * SQL-based population queries
 * Municipality GeoJSON data
-* Plotly-based population visualization
+* An interactive map with a fixed-center selection point and radius circle
+* Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback)
+* A population pyramid (male/female by age group) for the selected area
+* A year slider with play/pause, animating through 2000-2024
+* A standalone Plotly choropleth map (tested, not wired into the interactive app)
 * Unit and database integration tests
 * Docker-based test execution
 * GitHub Actions CI
 
-The next stage is to develop the visualization into an interactive analytical application, allowing users to explore population data for individual municipalities and over time.
+## Roadmap
+
+The remaining open idea from the original roadmap: at higher zoom levels, show a coarser geographic hierarchy (e.g. counties/regions) instead of individual municipalities. Not yet started, and no implementation decisions have been made.

@@ -1,10 +1,11 @@
-import pandas as pd
+"""Tests for scb_data.population."""
+
 from unittest.mock import patch
 
-from scb_data.population import (
-    clean_population_data,
-    load_population_data
-)
+import pandas as pd
+
+from scb_data.population import clean_population_data, load_population_data
+
 
 def test_clean_population_data():
     input_df = pd.DataFrame(
@@ -38,6 +39,7 @@ def test_clean_population_data():
     )
 
     pd.testing.assert_frame_equal(result, expected)
+
 
 def test_load_population_data():
     raw_data = pd.DataFrame(
@@ -86,4 +88,3 @@ def test_load_population_data():
     mock_insert.assert_called_once()
 
     pd.testing.assert_frame_equal(result, mock_insert.call_args.args[0])
-

@@ -1,6 +1,7 @@
+"""Fetch population data for every municipality, 2000-2024, into Postgres."""
+
 from scb_data.population import load_population_data
 from scb_data.scb_api import get_regions
-
 
 regions = get_regions()
 region_codes = [region["code"] for region in regions]

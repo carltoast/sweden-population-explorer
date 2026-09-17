@@ -1,11 +1,28 @@
+"""Clean SCB population data and load it into Postgres."""
+
 import pandas as pd
+
 from scb_data.database import (
     create_population_table,
-    insert_population_data
+    insert_population_data,
 )
 from scb_data.scb_api import get_population_data_batched
 
-def clean_population_data(df):
+
+def clean_population_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename/drop raw SCB jsonstat columns into the population DB schema.
+
+    Args:
+        df: Raw data as returned by get_population_data_batched, with
+            SCB's own dimension column names ("Region", "Alder", "Kon",
+            "Tid", etc).
+
+    Returns:
+        The same rows with columns renamed to the population table's
+        schema (region_code, region, age_code, age_group, sex_code, sex,
+        month, population); the ContentsCode and Tid_code columns are
+        dropped since they carry no information the pipeline needs.
+    """
     df = df.drop(
         columns=[
             "ContentsCode_code",
@@ -29,7 +46,24 @@ def clean_population_data(df):
 
     return df
 
-def load_population_data(regions, ages, sexes, months):
+
+def load_population_data(
+    regions: list[str],
+    ages: list[str],
+    sexes: list[str],
+    months: list[str],
+) -> pd.DataFrame:
+    """Fetch population data from the SCB API and store it in Postgres.
+
+    Args:
+        regions: Municipality region codes to load.
+        ages: Age group codes to load.
+        sexes: Sex codes to load ("1" male, "2" female).
+        months: Month codes to load, in SCB's "YYYYMmm" format.
+
+    Returns:
+        The cleaned data that was inserted into the population table.
+    """
     data = get_population_data_batched(
         regions=regions,
         ages=ages,
@@ -41,5 +75,5 @@ def load_population_data(regions, ages, sexes, months):
 
     create_population_table()
     insert_population_data(data)
-    
+
     return data

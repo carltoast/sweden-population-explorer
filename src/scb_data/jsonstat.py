@@ -1,8 +1,27 @@
+"""Convert SCB's JSON-stat API responses into pandas DataFrames."""
+
 from itertools import product
+
 import pandas as pd
 
 
-def jsonstat_to_dataframe(data):
+def jsonstat_to_dataframe(data: dict) -> pd.DataFrame:
+    """Convert a JSON-stat response into a flat pandas DataFrame.
+
+    Expands the JSON-stat dimensions/categories into one row per
+    observation, with a "<dimension>_code" and "<dimension>" (label)
+    column for each dimension, plus a "value" column.
+
+    Args:
+        data: JSON-stat payload as returned by the SCB API. Must have
+            "id" (dimension names, in order), "dimension" (category
+            codes/labels per dimension), and "value" (a flat list of
+            observations in dimension-cartesian-product order).
+
+    Returns:
+        One row per observation, with a "<dimension>_code"/"<dimension>"
+        column pair per dimension plus a "value" column.
+    """
     dimensions = data["id"]
     categories = {}
 

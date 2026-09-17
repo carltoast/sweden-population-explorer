@@ -1,6 +1,9 @@
+"""Tests for scb_data.jsonstat."""
+
 import pandas as pd
 
 from scb_data.jsonstat import jsonstat_to_dataframe
+
 
 def test_jsonstat_to_dataframe():
     data = {
@@ -48,4 +51,3 @@ def test_jsonstat_to_dataframe():
     )
 
     pd.testing.assert_frame_equal(result, expected)
-    

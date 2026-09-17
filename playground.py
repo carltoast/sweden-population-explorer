@@ -1,5 +1,6 @@
+"""Scratch file for ad hoc checks; not part of the pipeline."""
+
 import json
-import pandas as pd
 
 from scb_data.queries import get_population_by_region
 from scb_data.visualisation import create_population_map

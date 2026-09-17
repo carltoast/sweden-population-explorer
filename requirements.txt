@@ -2,4 +2,6 @@ requests
 pandas
 plotly
 pytest
+dash
+dash-leaflet
 psycopg[binary]

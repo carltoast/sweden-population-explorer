@@ -47,6 +47,29 @@ BOUNDARY_STYLE = {
     "fillOpacity": 0.5,
 }
 
+# Areas within the radius (but not the one the pin is actually in) get a
+# more saturated fill than BOUNDARY_STYLE; the one area the pin is actually
+# inside of gets a bolder, distinctly-colored outline on top of that -
+# these are separate dl.GeoJSON layers (see update_boundary_highlights)
+# rather than a per-feature style function, since that needs a clientside
+# JS callback (dash-leaflet's style/hideout props take a function for
+# per-feature styling, which dash-extensions provides but this project
+# doesn't otherwise depend on) - stacking a few static-styled layers with
+# different data subsets gets the same visual result with no JS.
+IN_RADIUS_STYLE = {
+    "color": "#2a5c8a",
+    "weight": 1.5,
+    "fillColor": "#7fb2e0",
+    "fillOpacity": 0.65,
+}
+SELECTED_AREA_STYLE = {
+    "color": "#8a5a00",
+    "weight": 2.5,
+    "fillColor": "#f2a900",
+    "fillOpacity": 0.55,
+}
+EMPTY_GEOJSON = {"type": "FeatureCollection", "features": []}
+
 # Sweden's real bounding box (from municipalities.geojson) is only ~13.2°
 # of longitude wide but ~13.7° of latitude tall - a narrow, elongated shape.
 # The zoom level that fits its full height into the map area (so the whole
@@ -196,6 +219,18 @@ app.layout = html.Div(
                                             id="boundaries-layer",
                                             data=MUNICIPALITIES_GEOJSON,
                                             style=BOUNDARY_STYLE,
+                                        ),
+                                        # Stacked on top of boundaries-layer;
+                                        # see update_boundary_highlights.
+                                        dl.GeoJSON(
+                                            id="in-radius-layer",
+                                            data=EMPTY_GEOJSON,
+                                            style=IN_RADIUS_STYLE,
+                                        ),
+                                        dl.GeoJSON(
+                                            id="selected-area-layer",
+                                            data=EMPTY_GEOJSON,
+                                            style=SELECTED_AREA_STYLE,
                                         ),
                                         dl.Circle(
                                             id="radius-circle",
@@ -442,6 +477,81 @@ def update_boundaries_layer(level: str) -> dict:
         COUNTIES_GEOJSON at "county", otherwise MUNICIPALITIES_GEOJSON.
     """
     return COUNTIES_GEOJSON if level == "county" else MUNICIPALITIES_GEOJSON
+
+
+@app.callback(
+    Output("in-radius-layer", "data"),
+    Output("selected-area-layer", "data"),
+    Input("map", "center"),
+    Input("radius-slider", "value"),
+    Input("level-selector", "value"),
+)
+def update_boundary_highlights(
+    center: dict | None,
+    radius_km: int,
+    level: str,
+) -> tuple[dict, dict]:
+    """Highlight in-radius areas and the one the pin is actually inside.
+
+    Args:
+        center: The map's current center, as {"lat": ..., "lng": ...},
+            or None before the map has reported one.
+        radius_km: The selected radius, in kilometers.
+        level: "municipality" or "county" (the level-selector's value).
+
+    Returns:
+        A (in_radius_geojson, selected_geojson) pair: the first holds
+        every area within the radius except the one containing the
+        selected point, the second holds just that containing area (or
+        both are empty FeatureCollections if center is None or nothing
+        matches).
+    """
+    if not center:
+        return EMPTY_GEOJSON, EMPTY_GEOJSON
+
+    if level == "county":
+        areas = find_counties_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        id_key = "lan_code"
+        source_geojson = COUNTIES_GEOJSON
+        feature_id_key = "lan_code"
+    else:
+        areas = find_municipalities_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        id_key = "region_code"
+        source_geojson = MUNICIPALITIES_GEOJSON
+        feature_id_key = "id"
+
+    selected_ids = {
+        area[id_key] for area in areas if area["contains_point"]
+    }
+    in_radius_ids = {
+        area[id_key] for area in areas if area[id_key] not in selected_ids
+    }
+
+    in_radius_features = [
+        feature
+        for feature in source_geojson["features"]
+        if feature["properties"][feature_id_key] in in_radius_ids
+    ]
+    selected_features = [
+        feature
+        for feature in source_geojson["features"]
+        if feature["properties"][feature_id_key] in selected_ids
+    ]
+
+    return (
+        {"type": "FeatureCollection", "features": in_radius_features},
+        {"type": "FeatureCollection", "features": selected_features},
+    )
 
 
 @app.callback(

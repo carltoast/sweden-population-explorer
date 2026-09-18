@@ -97,7 +97,7 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 
 * A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
 * A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
-* Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed.
+* Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed. The same areas are also highlighted directly on the map: a saturated blue for areas within the radius, amber for the one the pin is actually inside of.
 * A level selector switches between municipality and county: at county level, the map shows dissolved county outlines (municipality borders merged with Shapely) and the same radius search is grouped up by county, using the whole county's population (not just the part inside the circle).
 * A population pyramid (male/female by age group) is shown for the combined population of the selected municipalities or counties.
 * A year slider - with play/pause - moves through every year of data available (2000-2024), animating the pyramid over time.
@@ -197,7 +197,7 @@ The project currently provides:
 * SQL-based population queries
 * Municipality GeoJSON data
 * An interactive, borders-only map (no street tiles, restricted to Sweden) with a fixed-center selection point and radius circle
-* Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback)
+* Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback), highlighted directly on the map as well as listed
 * A municipality/county level selector, grouping the radius search up to whole counties
 * A population pyramid (male/female by age group) for the selected area
 * A year slider with play/pause, animating through 2000-2024
@@ -208,4 +208,4 @@ The project currently provides:
 
 ## Roadmap
 
-A UI rework is in progress: gender-neutral pyramid colors and a fixed play/pause axis, the single-viewport map-left/stats-right layout, and the borders-only Sweden-restricted map are done. Remaining: highlighting the selected area directly on the map.
+No further items are currently planned.

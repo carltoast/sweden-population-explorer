@@ -47,10 +47,19 @@ BOUNDARY_STYLE = {
     "fillOpacity": 0.5,
 }
 
-# Roughly Sweden's bounding box, padded slightly - the map has no tile
-# basemap (see "Known dash-leaflet findings" in CLAUDE.md for why), so this
-# is what keeps panning/zooming from wandering off into featureless space.
-SWEDEN_BOUNDS = [[54.5, 10.0], [69.7, 24.8]]
+# Sweden's real bounding box (from municipalities.geojson) is only ~13.2°
+# of longitude wide but ~13.7° of latitude tall - a narrow, elongated shape.
+# The zoom level that fits its full height into the map area (so the whole
+# country is visible by default, as intended) shows a viewport far WIDER
+# than that, because the map area itself is a wide/landscape panel. Leaflet's
+# maxBounds restricts the *viewport*, not just the pin - if the bounds box
+# were only lightly padded (as Sweden's own edges are), that already-wide
+# viewport would have almost nowhere to slide sideways before its own edge
+# hit the bounds wall, making panning feel frozen/snappy until zoomed in far
+# enough to shrink the viewport below the bounds size. Padding generously
+# (especially east-west, well beyond the country's own width) gives the
+# viewport real room to move at the default zoom too.
+SWEDEN_BOUNDS = [[47.3, -14.0], [77.1, 49.2]]
 MIN_ZOOM = 4
 
 EMPTY_PYRAMID_DATA = pd.DataFrame(

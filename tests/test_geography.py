@@ -1,8 +1,10 @@
 """Tests for scb_data.geography: distance, point-in-polygon, radius search."""
 
 import pytest
+from shapely.geometry import shape
 
 from scb_data.geography import (
+    dissolve_municipalities_to_counties,
     find_counties_within_radius,
     find_municipalities_within_radius,
     haversine_distance_km,
@@ -319,6 +321,111 @@ def test_find_counties_within_radius_returns_empty_when_none_in_range():
     )
 
     assert results == []
+
+
+def test_dissolve_municipalities_to_counties_one_feature_per_county():
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": "1480", "lan_code": "14"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"id": "1401", "lan_code": "14"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[1, 0], [2, 0], [2, 1], [1, 1], [1, 0]]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"id": "0180", "lan_code": "01"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]]
+                    ],
+                },
+            },
+        ],
+    }
+
+    result = dissolve_municipalities_to_counties(geojson)
+
+    lan_codes = sorted(f["properties"]["lan_code"] for f in result["features"])
+    assert lan_codes == ["01", "14"]
+
+
+def test_dissolve_municipalities_to_counties_merges_adjacent_shapes():
+    # Two unit squares sharing an edge, same county - should dissolve into
+    # a single seamless 2x1 rectangle, not stay as two separate polygons.
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": "1480", "lan_code": "14"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
+                    ],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"id": "1401", "lan_code": "14"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[1, 0], [2, 0], [2, 1], [1, 1], [1, 0]]
+                    ],
+                },
+            },
+        ],
+    }
+
+    result = dissolve_municipalities_to_counties(geojson)
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["geometry"]["type"] == "Polygon"
+
+    merged = shape(result["features"][0]["geometry"])
+    assert merged.area == pytest.approx(2.0)
+
+
+def test_dissolve_municipalities_to_counties_uses_county_names():
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": "1480", "lan_code": "14"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
+                    ],
+                },
+            },
+        ],
+    }
+
+    result = dissolve_municipalities_to_counties(geojson)
+
+    assert result["features"][0]["properties"]["county"] == (
+        "Västra Götalands län"
+    )
 
 
 def test_point_in_geometry_true_when_inside_polygon():

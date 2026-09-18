@@ -5,3 +5,4 @@ pytest
 dash
 dash-leaflet
 psycopg[binary]
+shapely

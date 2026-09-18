@@ -36,6 +36,7 @@ The project also includes municipality geometry data in GeoJSON format, which is
 * pandas
 * Dash / dash-leaflet
 * Plotly
+* Shapely
 * PostgreSQL
 * psycopg
 * pytest
@@ -92,12 +93,12 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 
 ## Interactive application
 
-`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically. The whole app fits a single viewport with no page scrolling: a control bar (title, level selector, year slider/play button) on top, the map on the left, and the population stats on the right.
+`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically. The whole app fits a single viewport with no page scrolling: a control bar (title, level selector, year slider/play button) on top, the map on the left, and the population stats on the right. The map itself has no street-tile basemap - just municipality or county borders on a plain background, restricted to roughly Sweden's bounding box - so the focus stays on geography relevant to the data rather than roads or place names.
 
 * A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
 * A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
 * Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed.
-* A level selector switches between municipality and county: at county level, the same radius search is grouped up by county, and the whole county's population (not just the part inside the circle) is used.
+* A level selector switches between municipality and county: at county level, the map shows dissolved county outlines (municipality borders merged with Shapely) and the same radius search is grouped up by county, using the whole county's population (not just the part inside the circle).
 * A population pyramid (male/female by age group) is shown for the combined population of the selected municipalities or counties.
 * A year slider - with play/pause - moves through every year of data available (2000-2024), animating the pyramid over time.
 
@@ -195,7 +196,7 @@ The project currently provides:
 * PostgreSQL storage
 * SQL-based population queries
 * Municipality GeoJSON data
-* An interactive map with a fixed-center selection point and radius circle
+* An interactive, borders-only map (no street tiles, restricted to Sweden) with a fixed-center selection point and radius circle
 * Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback)
 * A municipality/county level selector, grouping the radius search up to whole counties
 * A population pyramid (male/female by age group) for the selected area
@@ -207,4 +208,4 @@ The project currently provides:
 
 ## Roadmap
 
-A UI rework is in progress: gender-neutral pyramid colors and a fixed play/pause axis are done, as is the single-viewport map-left/stats-right layout. Remaining: restricting/simplifying the map to Sweden-only borders (no street tiles), and highlighting the selected area directly on the map.
+A UI rework is in progress: gender-neutral pyramid colors and a fixed play/pause axis, the single-viewport map-left/stats-right layout, and the borders-only Sweden-restricted map are done. Remaining: highlighting the selected area directly on the map.

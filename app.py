@@ -16,6 +16,7 @@ from dash import Dash, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
 from scb_data.geography import (
+    dissolve_municipalities_to_counties,
     find_counties_within_radius,
     find_municipalities_within_radius,
 )
@@ -34,6 +35,23 @@ with open(
 ) as file:
     MUNICIPALITIES_GEOJSON = json.load(file)
 
+# Computed once at startup, not per-request: dissolving ~290 municipality
+# polygons into 21 county polygons is pure CPU work independent of any
+# request, so it's done here rather than in a callback.
+COUNTIES_GEOJSON = dissolve_municipalities_to_counties(MUNICIPALITIES_GEOJSON)
+
+BOUNDARY_STYLE = {
+    "color": "#52514e",
+    "weight": 1,
+    "fillColor": "#cde2fb",
+    "fillOpacity": 0.5,
+}
+
+# Roughly Sweden's bounding box, padded slightly - the map has no tile
+# basemap (see "Known dash-leaflet findings" in CLAUDE.md for why), so this
+# is what keeps panning/zooming from wandering off into featureless space.
+SWEDEN_BOUNDS = [[54.5, 10.0], [69.7, 24.8]]
+MIN_ZOOM = 4
 
 EMPTY_PYRAMID_DATA = pd.DataFrame(
     columns=["age_code", "age_group", "sex_code", "sex", "population"]
@@ -156,7 +174,20 @@ app.layout = html.Div(
                             [
                                 dl.Map(
                                     [
-                                        dl.TileLayer(),
+                                        # No tile basemap: the map is just
+                                        # municipality/county borders on a
+                                        # plain background (see
+                                        # BOUNDARY_STYLE and
+                                        # assets/layout.css's
+                                        # .leaflet-container rule for the
+                                        # "sea" fill), swapped between the
+                                        # two levels by
+                                        # update_boundaries_layer below.
+                                        dl.GeoJSON(
+                                            id="boundaries-layer",
+                                            data=MUNICIPALITIES_GEOJSON,
+                                            style=BOUNDARY_STYLE,
+                                        ),
                                         dl.Circle(
                                             id="radius-circle",
                                             center=INITIAL_CENTER,
@@ -166,6 +197,9 @@ app.layout = html.Div(
                                     id="map",
                                     center=INITIAL_CENTER,
                                     zoom=5,
+                                    minZoom=MIN_ZOOM,
+                                    maxBounds=SWEDEN_BOUNDS,
+                                    maxBoundsViscosity=1.0,
                                     # trackViewport (on by default) reports
                                     # the map's center/zoom/bounds back to
                                     # Dash on every pan/zoom, via this
@@ -383,6 +417,22 @@ def advance_month(n_intervals: int, month_index: int) -> int:
         month so the animation loops instead of stopping at the end.
     """
     return (month_index + 1) % len(AVAILABLE_MONTHS)
+
+
+@app.callback(
+    Output("boundaries-layer", "data"),
+    Input("level-selector", "value"),
+)
+def update_boundaries_layer(level: str) -> dict:
+    """Switch the map's border layer between municipalities and counties.
+
+    Args:
+        level: "municipality" or "county" (the level-selector's value).
+
+    Returns:
+        COUNTIES_GEOJSON at "county", otherwise MUNICIPALITIES_GEOJSON.
+    """
+    return COUNTIES_GEOJSON if level == "county" else MUNICIPALITIES_GEOJSON
 
 
 @app.callback(

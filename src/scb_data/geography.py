@@ -2,6 +2,9 @@
 
 import math
 
+from shapely.geometry import mapping, shape
+from shapely.ops import unary_union
+
 EARTH_RADIUS_KM = 6371.0
 
 # Sweden's 21 counties (län), keyed by their two-digit SCB county code -
@@ -268,3 +271,46 @@ def find_counties_within_radius(
             )
 
     return sorted(counties.values(), key=lambda county: county["distance_km"])
+
+
+def dissolve_municipalities_to_counties(geojson: dict) -> dict:
+    """Merge municipality polygons into one dissolved polygon per county.
+
+    Used to draw a true single county outline on the map (rather than
+    just coloring a group of municipalities and leaving their shared
+    internal borders visible): groups every feature by lan_code and
+    unions their geometries with shapely, so adjacent municipalities
+    in the same county merge into one shape with no interior seam.
+
+    Args:
+        geojson: A GeoJSON FeatureCollection of municipalities, with a
+            "lan_code" property and Polygon/MultiPolygon geometries.
+
+    Returns:
+        A FeatureCollection with one feature per distinct lan_code,
+        each with properties lan_code and county (name from
+        COUNTY_NAMES, falling back to the raw code if unknown), and
+        the unioned municipality geometries as its geometry.
+    """
+    geometries_by_county: dict[str, list] = {}
+
+    for feature in geojson["features"]:
+        lan_code = feature["properties"].get("lan_code", "")
+        geometries_by_county.setdefault(lan_code, []).append(
+            shape(feature["geometry"])
+        )
+
+    features = []
+    for lan_code, geometries in geometries_by_county.items():
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "lan_code": lan_code,
+                    "county": COUNTY_NAMES.get(lan_code, lan_code),
+                },
+                "geometry": mapping(unary_union(geometries)),
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}

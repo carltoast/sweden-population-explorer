@@ -5,6 +5,7 @@ import pandas as pd
 from scb_data.database import insert_population_data
 from scb_data.queries import (
     get_available_months,
+    get_max_pyramid_value,
     get_population_by_region,
     get_population_change,
     get_population_history,
@@ -313,3 +314,28 @@ def test_get_population_pyramid_orders_by_age():
     )
 
     assert list(result["age_code"]) == ["-9", "20-29", "100+"]
+
+
+def test_get_max_pyramid_value_finds_largest_age_sex_total_across_months():
+    df = pd.DataFrame(
+        {
+            "region_code": ["1480", "1480", "1480", "1480"],
+            "region": ["Göteborg", "Göteborg", "Göteborg", "Göteborg"],
+            "age_code": ["-9", "-9", "20-29", "20-29"],
+            "age_group": [
+                "0–9 years", "0–9 years", "20–29 years", "20–29 years",
+            ],
+            "sex_code": ["1", "1", "1", "1"],
+            "sex": ["men", "men", "men", "men"],
+            "month": ["2020M12", "2024M12", "2020M12", "2024M12"],
+            "population": [100, 150, 200, 90],
+        }
+    )
+
+    insert_population_data(df)
+
+    assert get_max_pyramid_value(["1480"]) == 200
+
+
+def test_get_max_pyramid_value_returns_zero_for_no_matching_regions():
+    assert get_max_pyramid_value(["9999"]) == 0.0

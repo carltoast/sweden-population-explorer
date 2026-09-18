@@ -19,7 +19,11 @@ from scb_data.geography import (
     find_counties_within_radius,
     find_municipalities_within_radius,
 )
-from scb_data.queries import get_available_months, get_population_pyramid
+from scb_data.queries import (
+    get_available_months,
+    get_max_pyramid_value,
+    get_population_pyramid,
+)
 from scb_data.visualisation import create_population_pyramid
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -391,7 +395,10 @@ def update_population_pyramid(
     Returns:
         An empty pyramid if center is None or no areas fall within the
         radius at the chosen level, otherwise the population pyramid
-        summed across those areas for the selected year.
+        summed across those areas for the selected year, with the
+        x-axis fixed to the largest value seen across every year of
+        the current selection so the axis doesn't rescale as the year
+        slider or play/pause moves through months.
     """
     if not center:
         return create_population_pyramid(EMPTY_PYRAMID_DATA)
@@ -420,8 +427,9 @@ def update_population_pyramid(
 
     month = AVAILABLE_MONTHS[month_index]
     pyramid_data = get_population_pyramid(region_codes, month)
+    axis_max = get_max_pyramid_value(region_codes)
 
-    return create_population_pyramid(pyramid_data)
+    return create_population_pyramid(pyramid_data, axis_max=axis_max)
 
 
 if __name__ == "__main__":

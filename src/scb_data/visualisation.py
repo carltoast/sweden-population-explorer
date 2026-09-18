@@ -5,10 +5,15 @@ import math
 import pandas as pd
 import plotly.graph_objects as go
 
-# Categorical slots 1 (blue) and 2 (orange): validated as an adjacent CVD-safe
-# pair (see the dataviz skill's palette) for exactly two series like this.
-MALE_COLOR = "#2a78d6"
-FEMALE_COLOR = "#eb6834"
+# Aqua/violet (categorical slots 3 and 7): a gender-neutral pair, re-checked
+# against the dataviz skill's validator for this specific (non-adjacent)
+# pairing since the palette only pre-validates adjacent slots - CVD Delta E
+# 31.1, normal-vision Delta E 35.8 (target/floor 8.0/15.0), both well clear.
+# Aqua's contrast against white is 2.74 (just under the 3:1 floor); the
+# palette's documented mitigation for that - visible direct labels - is
+# already satisfied by this chart's legend and hover labels.
+MALE_COLOR = "#1baf7a"
+FEMALE_COLOR = "#4a3aa7"
 
 
 def prepare_geojson(geojson: dict) -> dict:
@@ -195,13 +200,22 @@ def _symmetric_ticks(max_value: float) -> tuple[list[float], list[str]]:
     return tick_values, tick_text
 
 
-def create_population_pyramid(data: pd.DataFrame) -> go.Figure:
+def create_population_pyramid(
+    data: pd.DataFrame,
+    axis_max: float | None = None,
+) -> go.Figure:
     """Create a population pyramid: male population left, female right.
 
     Args:
         data: Rows with age_code, age_group, sex_code ("1" male, "2"
             female), and population, already ordered by age (e.g. from
             scb_data.queries.get_population_pyramid). May be empty.
+        axis_max: If given, the axis is scaled to at least this
+            magnitude even if data's own max is smaller - used to hold
+            a fixed x-axis range across an entire play/pause animation
+            (e.g. the max over every year of the selected area) rather
+            than rescaling to each frame's own max. Defaults to None,
+            which scales to data's own max as before.
 
     Returns:
         A figure with two horizontal bar traces (male, female) sharing
@@ -249,12 +263,15 @@ def create_population_pyramid(data: pd.DataFrame) -> go.Figure:
     )
 
     max_population = max(male_population.max(), female_population.max())
+    if axis_max is not None:
+        max_population = max(max_population, axis_max)
     tick_values, tick_text = _symmetric_ticks(max_population)
 
     fig.update_layout(
         barmode="overlay",
         xaxis={
             "title": "Population",
+            "range": [tick_values[0], tick_values[-1]],
             "tickvals": tick_values,
             "ticktext": tick_text,
             "gridcolor": "#e1e0d9",

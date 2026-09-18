@@ -482,6 +482,61 @@ def test_create_population_pyramid_tick_values_are_symmetric():
     assert 0 in tick_values
 
 
+def test_create_population_pyramid_range_matches_outer_ticks():
+    fig = create_population_pyramid(_population_pyramid_fixture())
+
+    tick_values = list(fig.layout.xaxis.tickvals)
+
+    assert list(fig.layout.xaxis.range) == [tick_values[0], tick_values[-1]]
+
+
+def test_create_population_pyramid_axis_max_fixes_range_across_frames():
+    small_frame = create_population_pyramid(
+        _population_pyramid_fixture(), axis_max=100_000
+    )
+    large_frame = create_population_pyramid(
+        pd.DataFrame(
+            {
+                "age_code": ["-9"],
+                "age_group": ["0–9 years"],
+                "sex_code": ["1"],
+                "sex": ["men"],
+                "population": [99_000],
+            }
+        ),
+        axis_max=100_000,
+    )
+
+    assert (
+        list(small_frame.layout.xaxis.range)
+        == list(large_frame.layout.xaxis.range)
+    )
+
+
+def test_create_population_pyramid_axis_max_widens_ticks():
+    default_fig = create_population_pyramid(_population_pyramid_fixture())
+    widened_fig = create_population_pyramid(
+        _population_pyramid_fixture(), axis_max=100_000
+    )
+
+    default_max = max(default_fig.layout.xaxis.tickvals)
+    widened_max = max(widened_fig.layout.xaxis.tickvals)
+
+    assert widened_max > default_max
+
+
+def test_create_population_pyramid_axis_max_ignored_if_smaller():
+    default_fig = create_population_pyramid(_population_pyramid_fixture())
+    narrower_fig = create_population_pyramid(
+        _population_pyramid_fixture(), axis_max=1
+    )
+
+    default_max = max(default_fig.layout.xaxis.tickvals)
+    narrower_max = max(narrower_fig.layout.xaxis.tickvals)
+
+    assert narrower_max == default_max
+
+
 def test_create_population_pyramid_handles_missing_sex():
     data = pd.DataFrame(
         {

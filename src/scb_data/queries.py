@@ -173,3 +173,34 @@ def get_population_pyramid(
     )
 
     return result.sort_values(["age_code", "sex_code"]).reset_index(drop=True)
+
+
+def get_max_pyramid_value(region_codes: list[str]) -> float:
+    """Largest single age/sex population total across every month.
+
+    Used to fix the population pyramid's x-axis range for the whole
+    play/pause animation up front, instead of get_population_pyramid's
+    per-month result rescaling the axis on every frame.
+
+    Args:
+        region_codes: Municipality region codes to sum over.
+
+    Returns:
+        The largest month/age/sex population total (summed across
+        region_codes) over all months, or 0.0 if none exists (e.g. an
+        empty region_codes list).
+    """
+    query = """
+        SELECT COALESCE(MAX(age_sex_population), 0) AS max_value
+        FROM (
+            SELECT SUM(population) AS age_sex_population
+            FROM population
+            WHERE region_code = ANY(%s)
+            GROUP BY month, age_code, sex_code
+        ) AS month_age_sex_totals;
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (region_codes,))
+            return float(cursor.fetchone()[0])

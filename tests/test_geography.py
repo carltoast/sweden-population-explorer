@@ -3,10 +3,55 @@
 import pytest
 
 from scb_data.geography import (
+    find_counties_within_radius,
     find_municipalities_within_radius,
     haversine_distance_km,
     point_in_geometry,
 )
+
+VASTRA_GOTALAND_GEOJSON = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "1480",
+                "kom_namn": "Göteborg",
+                "lan_code": "14",
+                "geo_point_2d": [57.7089, 11.9746],
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [11.9746, 57.7089],
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "1401",
+                "kom_namn": "Härryda",
+                "lan_code": "14",
+                # Far outside any radius used below, to prove county
+                # grouping includes it via lan_code, not distance.
+                "geo_point_2d": [50, 50],
+            },
+            "geometry": {"type": "Point", "coordinates": [50, 50]},
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "0180",
+                "kom_namn": "Stockholm",
+                "lan_code": "01",
+                "geo_point_2d": [59.3293, 18.0686],
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [18.0686, 59.3293],
+            },
+        },
+    ],
+}
 
 
 def test_haversine_distance_km_same_point_is_zero():
@@ -226,6 +271,54 @@ def test_find_municipalities_within_radius_sets_contains_point_false():
     )
 
     assert results[0]["contains_point"] is False
+
+
+def test_find_counties_within_radius_groups_by_county():
+    results = find_counties_within_radius(
+        latitude=57.7089,
+        longitude=11.9746,
+        radius_km=30,
+        geojson=VASTRA_GOTALAND_GEOJSON,
+    )
+
+    assert [result["lan_code"] for result in results] == ["14"]
+    assert results[0]["county"] == "Västra Götalands län"
+
+
+def test_find_counties_within_radius_includes_every_municipality_in_county():
+    results = find_counties_within_radius(
+        latitude=57.7089,
+        longitude=11.9746,
+        radius_km=5,
+        geojson=VASTRA_GOTALAND_GEOJSON,
+    )
+
+    # Härryda's representative point is far outside the 5km radius, but
+    # it belongs to the same county as Göteborg, which is within it, so
+    # it should still be included in the county's region_codes.
+    assert sorted(results[0]["region_codes"]) == ["1401", "1480"]
+
+
+def test_find_counties_within_radius_uses_nearest_municipality_distance():
+    results = find_counties_within_radius(
+        latitude=57.7089,
+        longitude=11.9746,
+        radius_km=30,
+        geojson=VASTRA_GOTALAND_GEOJSON,
+    )
+
+    assert results[0]["distance_km"] == pytest.approx(0)
+
+
+def test_find_counties_within_radius_returns_empty_when_none_in_range():
+    results = find_counties_within_radius(
+        latitude=0,
+        longitude=0,
+        radius_km=1,
+        geojson=VASTRA_GOTALAND_GEOJSON,
+    )
+
+    assert results == []
 
 
 def test_point_in_geometry_true_when_inside_polygon():

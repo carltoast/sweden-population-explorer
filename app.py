@@ -15,7 +15,10 @@ import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from scb_data.geography import find_municipalities_within_radius
+from scb_data.geography import (
+    find_counties_within_radius,
+    find_municipalities_within_radius,
+)
 from scb_data.queries import get_available_months, get_population_pyramid
 from scb_data.visualisation import create_population_pyramid
 
@@ -110,6 +113,22 @@ app.layout = html.Div(
                         for km in range(0, MAX_RADIUS_KM + 1, 20)
                     },
                     tooltip={"placement": "bottom", "always_visible": True},
+                ),
+            ],
+            style={"padding": "1rem 2rem"},
+        ),
+
+        html.Div(
+            [
+                html.Label("Level"),
+                dcc.RadioItems(
+                    id="level-selector",
+                    options=[
+                        {"label": "Municipality", "value": "municipality"},
+                        {"label": "County", "value": "county"},
+                    ],
+                    value="municipality",
+                    inline=True,
                 ),
             ],
             style={"padding": "1rem 2rem"},
@@ -279,51 +298,66 @@ def update_radius_circle(
     Output("municipalities-output", "children"),
     Input("map", "center"),
     Input("radius-slider", "value"),
+    Input("level-selector", "value"),
 )
 def display_municipalities(
     center: dict | None,
     radius_km: int,
+    level: str,
 ) -> html.Div | None:
-    """List the municipalities within the selected radius.
+    """List the municipalities or counties within the selected radius.
 
     Args:
         center: The map's current center, as {"lat": ..., "lng": ...},
             or None before the map has reported one.
         radius_km: The selected radius, in kilometers.
+        level: "municipality" or "county" (the level-selector's value).
 
     Returns:
-        None if center is None, a "no municipalities" message if the
-        radius contains none, or a div with a count and a bullet list
-        (nearest first, distance in km, flagging the one municipality -
-        if any - whose actual boundary contains the selected point).
+        None if center is None, a "none within radius" message if the
+        radius contains none at the chosen level, or a div with a count
+        and a bullet list (nearest first, distance in km, flagging any
+        area whose actual boundary contains the selected point).
     """
     if not center:
         return None
 
-    municipalities = find_municipalities_within_radius(
-        latitude=center["lat"],
-        longitude=center["lng"],
-        radius_km=radius_km,
-        geojson=MUNICIPALITIES_GEOJSON,
-    )
+    if level == "county":
+        areas = find_counties_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        noun = "counties"
+        name_key = "county"
+    else:
+        areas = find_municipalities_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        noun = "municipalities"
+        name_key = "region"
 
-    if not municipalities:
-        return html.Div("No municipalities within radius")
+    if not areas:
+        return html.Div(f"No {noun} within radius")
 
     return html.Div(
         [
-            html.Div(f"{len(municipalities)} municipalities within radius:"),
+            html.Div(f"{len(areas)} {noun} within radius:"),
             html.Ul(
                 [
                     html.Li(
-                        f"{m['region']} ({m['distance_km']:.1f} km)"
+                        f"{area[name_key]} ({area['distance_km']:.1f} km)"
                         + (
                             " — contains selected point"
-                            if m["contains_point"]
+                            if area["contains_point"]
                             else ""
                         )
                     )
-                    for m in municipalities
+                    for area in areas
                 ]
             ),
         ]
@@ -335,11 +369,13 @@ def display_municipalities(
     Input("map", "center"),
     Input("radius-slider", "value"),
     Input("month-slider", "value"),
+    Input("level-selector", "value"),
 )
 def update_population_pyramid(
     center: dict | None,
     radius_km: int,
     month_index: int,
+    level: str,
 ) -> go.Figure:
     """Build the population pyramid for the selected area and year.
 
@@ -348,26 +384,40 @@ def update_population_pyramid(
             or None before the map has reported one.
         radius_km: The selected radius, in kilometers.
         month_index: Index into AVAILABLE_MONTHS for the selected year.
+        level: "municipality" or "county" (the level-selector's value).
+            At "county", the pyramid covers every municipality in each
+            matched county, not just the ones inside the radius.
 
     Returns:
-        An empty pyramid if center is None or no municipalities fall
-        within the radius, otherwise the population pyramid summed
-        across those municipalities for the selected year.
+        An empty pyramid if center is None or no areas fall within the
+        radius at the chosen level, otherwise the population pyramid
+        summed across those areas for the selected year.
     """
     if not center:
         return create_population_pyramid(EMPTY_PYRAMID_DATA)
 
-    municipalities = find_municipalities_within_radius(
-        latitude=center["lat"],
-        longitude=center["lng"],
-        radius_km=radius_km,
-        geojson=MUNICIPALITIES_GEOJSON,
-    )
+    if level == "county":
+        counties = find_counties_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        region_codes = [
+            code for county in counties for code in county["region_codes"]
+        ]
+    else:
+        municipalities = find_municipalities_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        region_codes = [m["region_code"] for m in municipalities]
 
-    if not municipalities:
+    if not region_codes:
         return create_population_pyramid(EMPTY_PYRAMID_DATA)
 
-    region_codes = [m["region_code"] for m in municipalities]
     month = AVAILABLE_MONTHS[month_index]
     pyramid_data = get_population_pyramid(region_codes, month)
 

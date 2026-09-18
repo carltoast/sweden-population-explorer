@@ -4,6 +4,34 @@ import math
 
 EARTH_RADIUS_KM = 6371.0
 
+# Sweden's 21 counties (län), keyed by their two-digit SCB county code -
+# the first two digits of every four-digit municipality region_code. Not
+# present in data/municipalities.geojson (which only has lan_code), and
+# stable enough (unchanged since 1998) to hardcode rather than fetch.
+COUNTY_NAMES: dict[str, str] = {
+    "01": "Stockholms län",
+    "03": "Uppsala län",
+    "04": "Södermanlands län",
+    "05": "Östergötlands län",
+    "06": "Jönköpings län",
+    "07": "Kronobergs län",
+    "08": "Kalmar län",
+    "09": "Gotlands län",
+    "10": "Blekinge län",
+    "12": "Skåne län",
+    "13": "Hallands län",
+    "14": "Västra Götalands län",
+    "17": "Värmlands län",
+    "18": "Örebro län",
+    "19": "Västmanlands län",
+    "20": "Dalarnas län",
+    "21": "Gävleborgs län",
+    "22": "Västernorrlands län",
+    "23": "Jämtlands län",
+    "24": "Västerbottens län",
+    "25": "Norrbottens län",
+}
+
 
 def haversine_distance_km(
     lat1: float,
@@ -136,9 +164,10 @@ def find_municipalities_within_radius(
 
     Returns:
         One dict per matching municipality, with region_code, region,
-        distance_km (to its representative point), and contains_point
-        (whether its actual polygon contains the selected point), sorted
-        by distance_km ascending.
+        lan_code (its two-digit county code, "" if absent), distance_km
+        (to its representative point), and contains_point (whether its
+        actual polygon contains the selected point), sorted by
+        distance_km ascending.
     """
     results = []
 
@@ -159,6 +188,7 @@ def find_municipalities_within_radius(
                 {
                     "region_code": properties["id"],
                     "region": properties["kom_namn"],
+                    "lan_code": properties.get("lan_code", ""),
                     "distance_km": distance_km,
                     "contains_point": contains_point,
                 }
@@ -167,3 +197,74 @@ def find_municipalities_within_radius(
     results.sort(key=lambda result: result["distance_km"])
 
     return results
+
+
+def find_counties_within_radius(
+    latitude: float,
+    longitude: float,
+    radius_km: float,
+    geojson: dict,
+) -> list[dict]:
+    """Find counties touched by a radius, via their municipalities.
+
+    A county is included if at least one of its municipalities is
+    returned by find_municipalities_within_radius for the same point
+    and radius. Its region_codes list every municipality in that
+    county (not just the ones inside the radius), so population
+    aggregation reflects the whole county rather than only the part
+    that overlaps the selection circle.
+
+    Args:
+        latitude: Latitude of the selected point, in degrees.
+        longitude: Longitude of the selected point, in degrees.
+        radius_km: Search radius, in kilometers.
+        geojson: A GeoJSON FeatureCollection of municipalities, with an
+            "id" (region code), "kom_namn" (name), "lan_code" (county
+            code), and "geo_point_2d" ([lat, lon]) property per feature.
+
+    Returns:
+        One dict per matching county, with lan_code, county (name from
+        COUNTY_NAMES, falling back to the raw code if unknown),
+        region_codes (every municipality region_code in that county),
+        distance_km (the nearest of its within-radius municipalities),
+        and contains_point (True if any of them contains the selected
+        point), sorted by distance_km ascending.
+    """
+    municipalities = find_municipalities_within_radius(
+        latitude=latitude,
+        longitude=longitude,
+        radius_km=radius_km,
+        geojson=geojson,
+    )
+
+    municipalities_by_county: dict[str, list[str]] = {}
+    for feature in geojson["features"]:
+        properties = feature["properties"]
+        lan_code = properties.get("lan_code", "")
+        municipalities_by_county.setdefault(lan_code, []).append(
+            properties["id"]
+        )
+
+    counties: dict[str, dict] = {}
+
+    for municipality in municipalities:
+        lan_code = municipality["lan_code"]
+        county = counties.get(lan_code)
+
+        if county is None:
+            counties[lan_code] = {
+                "lan_code": lan_code,
+                "county": COUNTY_NAMES.get(lan_code, lan_code),
+                "region_codes": municipalities_by_county[lan_code],
+                "distance_km": municipality["distance_km"],
+                "contains_point": municipality["contains_point"],
+            }
+        else:
+            county["distance_km"] = min(
+                county["distance_km"], municipality["distance_km"]
+            )
+            county["contains_point"] = (
+                county["contains_point"] or municipality["contains_point"]
+            )
+
+    return sorted(counties.values(), key=lambda county: county["distance_km"])

@@ -97,7 +97,8 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 * A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
 * A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
 * Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed.
-* A population pyramid (male/female by age group) is shown for the combined population of those municipalities.
+* A level selector switches between municipality and county: at county level, the same radius search is grouped up by county, and the whole county's population (not just the part inside the circle) is used.
+* A population pyramid (male/female by age group) is shown for the combined population of the selected municipalities or counties.
 * A year slider - with play/pause - moves through every year of data available (2000-2024), animating the pyramid over time.
 
 Run it locally with:
@@ -196,6 +197,7 @@ The project currently provides:
 * Municipality GeoJSON data
 * An interactive map with a fixed-center selection point and radius circle
 * Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback)
+* A municipality/county level selector, grouping the radius search up to whole counties
 * A population pyramid (male/female by age group) for the selected area
 * A year slider with play/pause, animating through 2000-2024
 * A standalone Plotly choropleth map (tested, not wired into the interactive app)
@@ -205,4 +207,4 @@ The project currently provides:
 
 ## Roadmap
 
-The remaining open idea from the original roadmap: at higher zoom levels, show a coarser geographic hierarchy (e.g. counties/regions) instead of individual municipalities. Not yet started, and no implementation decisions have been made.
+No further items are currently planned.

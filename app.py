@@ -58,125 +58,239 @@ PLAY_INTERVAL_MS = 800
 app = Dash(__name__)
 
 
+# Every panel below is sized with flex/minHeight-0 (not vh units on the map,
+# as before) so the whole app fills exactly one viewport - map left, stats
+# right - with no page scroll; only the municipality/county list scrolls
+# internally if it grows long.
 app.layout = html.Div(
     [
-        html.H1("Population in Swedish Municipalities"),
-
         html.Div(
             [
-                dl.Map(
+                html.H1(
+                    "Population in Swedish Municipalities",
+                    style={
+                        "fontSize": "1.15rem",
+                        "margin": 0,
+                        "whiteSpace": "nowrap",
+                    },
+                ),
+
+                html.Div(
                     [
-                        dl.TileLayer(),
-                        dl.Circle(
-                            id="radius-circle",
-                            center=INITIAL_CENTER,
-                            radius=INITIAL_RADIUS_KM * 1000,
+                        html.Label("Level"),
+                        dcc.RadioItems(
+                            id="level-selector",
+                            options=[
+                                {
+                                    "label": "Municipality",
+                                    "value": "municipality",
+                                },
+                                {"label": "County", "value": "county"},
+                            ],
+                            value="municipality",
+                            inline=True,
                         ),
                     ],
-                    id="map",
-                    center=INITIAL_CENTER,
-                    zoom=5,
-                    # trackViewport (on by default) reports the map's
-                    # center/zoom/bounds back to Dash on every pan/zoom, via
-                    # this component's own "center" prop.
-                    trackViewport=True,
-                    style={"height": "80vh"},
-                ),
-
-                # The selection point is a fixed screen-center overlay, not a
-                # real Leaflet marker: it never moves on screen, the user
-                # pans/zooms the map underneath it, and its geographic
-                # position is simply the map's current center (see callback).
-                html.Div(
-                    "📍",
                     style={
-                        "position": "absolute",
-                        "top": "50%",
-                        "left": "50%",
-                        "transform": "translate(-50%, -100%)",
-                        "fontSize": "32px",
-                        "pointerEvents": "none",
-                        "zIndex": "1000",
+                        "display": "flex",
+                        "alignItems": "center",
+                        "gap": "0.5rem",
                     },
                 ),
-            ],
-            style={"position": "relative"},
-        ),
 
-        html.Div(
-            [
-                html.Label("Radius (km)"),
-                dcc.Slider(
-                    id="radius-slider",
-                    min=1,
-                    max=MAX_RADIUS_KM,
-                    step=1,
-                    value=INITIAL_RADIUS_KM,
-                    marks={
-                        km: str(km)
-                        for km in range(0, MAX_RADIUS_KM + 1, 20)
-                    },
-                    tooltip={"placement": "bottom", "always_visible": True},
-                ),
-            ],
-            style={"padding": "1rem 2rem"},
-        ),
-
-        html.Div(
-            [
-                html.Label("Level"),
-                dcc.RadioItems(
-                    id="level-selector",
-                    options=[
-                        {"label": "Municipality", "value": "municipality"},
-                        {"label": "County", "value": "county"},
+                html.Div(
+                    [
+                        html.Label("Year"),
+                        html.Div(
+                            dcc.Slider(
+                                id="month-slider",
+                                min=0,
+                                max=LATEST_MONTH_INDEX,
+                                step=1,
+                                value=LATEST_MONTH_INDEX,
+                                # Marks show the year (all available months
+                                # are December snapshots today); the full
+                                # month string is in selection-output.
+                                marks={
+                                    i: month[:4]
+                                    for i, month in enumerate(
+                                        AVAILABLE_MONTHS
+                                    )
+                                },
+                            ),
+                            style={"width": "18rem"},
+                        ),
+                        html.Button("Play", id="play-button", n_clicks=0),
+                        # Renders nothing; just fires on a timer while not
+                        # disabled.
+                        dcc.Interval(
+                            id="play-interval",
+                            interval=PLAY_INTERVAL_MS,
+                            disabled=True,
+                        ),
                     ],
-                    value="municipality",
-                    inline=True,
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "gap": "0.75rem",
+                        "flex": "1 1 auto",
+                    },
                 ),
             ],
-            style={"padding": "1rem 2rem"},
+            style={
+                "display": "flex",
+                "alignItems": "center",
+                "gap": "2rem",
+                "padding": "0.5rem 1rem",
+                "borderBottom": "1px solid #ddd",
+                "flex": "0 0 auto",
+            },
         ),
 
         html.Div(
             [
-                html.Label("Year"),
-                dcc.Slider(
-                    id="month-slider",
-                    min=0,
-                    max=LATEST_MONTH_INDEX,
-                    step=1,
-                    value=LATEST_MONTH_INDEX,
-                    # Marks show the year (all available months are December
-                    # snapshots today); the full month string is shown below
-                    # in selection-output regardless.
-                    marks={
-                        i: month[:4]
-                        for i, month in enumerate(AVAILABLE_MONTHS)
+                # Left: map + radius slider.
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                dl.Map(
+                                    [
+                                        dl.TileLayer(),
+                                        dl.Circle(
+                                            id="radius-circle",
+                                            center=INITIAL_CENTER,
+                                            radius=INITIAL_RADIUS_KM * 1000,
+                                        ),
+                                    ],
+                                    id="map",
+                                    center=INITIAL_CENTER,
+                                    zoom=5,
+                                    # trackViewport (on by default) reports
+                                    # the map's center/zoom/bounds back to
+                                    # Dash on every pan/zoom, via this
+                                    # component's own "center" prop.
+                                    trackViewport=True,
+                                    style={"height": "100%"},
+                                ),
+
+                                # The selection point is a fixed
+                                # screen-center overlay, not a real Leaflet
+                                # marker: it never moves on screen, the user
+                                # pans/zooms the map underneath it, and its
+                                # geographic position is simply the map's
+                                # current center (see callback).
+                                html.Div(
+                                    "📍",
+                                    style={
+                                        "position": "absolute",
+                                        "top": "50%",
+                                        "left": "50%",
+                                        "transform": (
+                                            "translate(-50%, -100%)"
+                                        ),
+                                        "fontSize": "32px",
+                                        "pointerEvents": "none",
+                                        "zIndex": "1000",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "position": "relative",
+                                "flex": "1 1 auto",
+                                "minHeight": 0,
+                            },
+                        ),
+
+                        html.Div(
+                            [
+                                html.Label("Radius (km)"),
+                                dcc.Slider(
+                                    id="radius-slider",
+                                    min=1,
+                                    max=MAX_RADIUS_KM,
+                                    step=1,
+                                    value=INITIAL_RADIUS_KM,
+                                    marks={
+                                        km: str(km)
+                                        for km in range(
+                                            0, MAX_RADIUS_KM + 1, 20
+                                        )
+                                    },
+                                    tooltip={
+                                        "placement": "bottom",
+                                        "always_visible": True,
+                                    },
+                                ),
+                            ],
+                            style={
+                                "padding": "0.5rem 1.5rem",
+                                "flex": "0 0 auto",
+                            },
+                        ),
+                    ],
+                    style={
+                        "flex": "1 1 60%",
+                        "display": "flex",
+                        "flexDirection": "column",
+                        "minWidth": 0,
+                        "minHeight": 0,
                     },
                 ),
-                html.Button("Play", id="play-button", n_clicks=0),
-                # Renders nothing; just fires on a timer while not disabled.
-                dcc.Interval(
-                    id="play-interval",
-                    interval=PLAY_INTERVAL_MS,
-                    disabled=True,
+
+                # Right: selection summary, area list, population pyramid.
+                html.Div(
+                    [
+                        html.Div(
+                            "No selection yet",
+                            id="selection-output",
+                            style={"flex": "0 0 auto"},
+                        ),
+
+                        html.Div(
+                            id="municipalities-output",
+                            # A fixed height (rather than a percentage of
+                            # the flex column) so it reliably scrolls
+                            # internally instead of clipping when the list
+                            # is long or the viewport is short.
+                            style={
+                                "flex": "0 0 10rem",
+                                "overflowY": "auto",
+                            },
+                        ),
+
+                        dcc.Graph(
+                            id="population-pyramid",
+                            style={"flex": "1 1 auto", "minHeight": 0},
+                            config={"responsive": True},
+                        ),
+                    ],
+                    style={
+                        "flex": "1 1 40%",
+                        "display": "flex",
+                        "flexDirection": "column",
+                        "minWidth": 0,
+                        "minHeight": 0,
+                        "padding": "0.5rem 1rem",
+                        "overflow": "hidden",
+                    },
                 ),
             ],
-            style={"padding": "1rem 2rem"},
+            style={
+                "display": "flex",
+                "flex": "1 1 auto",
+                "minHeight": 0,
+                "overflow": "hidden",
+            },
         ),
-
-        html.Div(
-            "No selection yet",
-            id="selection-output",
-        ),
-
-        html.Div(
-            id="municipalities-output",
-        ),
-
-        dcc.Graph(id="population-pyramid"),
-    ]
+    ],
+    style={
+        "height": "100vh",
+        "display": "flex",
+        "flexDirection": "column",
+        "overflow": "hidden",
+        "fontFamily": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    },
 )
 
 

@@ -1,0 +1,9 @@
+/* Dash auto-loads every file in assets/. This resets the page's default
+   body margin/scroll so app.py's single-viewport, no-scroll layout isn't
+   pushed past 100vh by an 8px default body margin. */
+html,
+body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+}

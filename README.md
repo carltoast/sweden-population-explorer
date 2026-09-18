@@ -92,7 +92,7 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 
 ## Interactive application
 
-`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically:
+`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically. The whole app fits a single viewport with no page scrolling: a control bar (title, level selector, year slider/play button) on top, the map on the left, and the population stats on the right.
 
 * A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
 * A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
@@ -207,4 +207,4 @@ The project currently provides:
 
 ## Roadmap
 
-No further items are currently planned.
+A UI rework is in progress: gender-neutral pyramid colors and a fixed play/pause axis are done, as is the single-viewport map-left/stats-right layout. Remaining: restricting/simplifying the map to Sweden-only borders (no street tiles), and highlighting the selected area directly on the map.

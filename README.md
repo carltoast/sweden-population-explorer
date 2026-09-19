@@ -1,4 +1,4 @@
-# SCB Data Pipeline
+# Sweden Population Explorer
 
 This is a personal project to gain hands-on experience with the full lifecycle of a data project: pulling real-world data from a public API, cleaning and storing it in a relational database, and building an interactive application to explore it geographically. It's achieved by working with Statistics Sweden's (SCB) open population statistics (covering every Swedish municipality, by age and sex, from 2000 onward) through a Python/PostgreSQL pipeline and a Dash/Leaflet web application built on top of it.
 

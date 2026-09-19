@@ -1,6 +1,10 @@
 # SCB Data Pipeline
 
-A Python data pipeline for retrieving regional population data from Statistics Sweden (SCB), transforming it, and storing it in PostgreSQL, plus an interactive Dash application for exploring that data geographically.
+This is a personal project to gain hands-on experience with the full lifecycle of a data project: pulling real-world data from a public API, cleaning and storing it in a relational database, and building an interactive application to explore it geographically. It's achieved by working with Statistics Sweden's (SCB) open population statistics (covering every Swedish municipality, by age and sex, from 2000 onward) through a Python/PostgreSQL pipeline and a Dash/Leaflet web application built on top of it.
+
+This project was developed with the assistance of Claude Code.
+
+![Demo: exploring population data from a Västra Götaland county overview down to Borgholm municipality](docs/demo.gif)
 
 ## Current pipeline
 
@@ -50,6 +54,8 @@ scb-project/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
+├── assets/
+│   └── layout.css
 ├── data/
 │   └── municipalities.geojson
 ├── src/
@@ -75,8 +81,7 @@ scb-project/
 ├── compose.yaml
 ├── pyproject.toml
 ├── requirements.txt
-├── run_pipeline.py
-└── playground.py
+└── run_pipeline.py
 ```
 
 ## Data source
@@ -93,22 +98,13 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 
 ## Interactive application
 
-`app.py` is a Dash application (built on `dash-leaflet`) for exploring the population data geographically. The whole app fits a single viewport with no page scrolling: a control bar (title, level selector, year slider/play button) on top, the map on the left, and the population stats on the right. The map itself has no street-tile basemap - just municipality or county borders on a plain background, restricted to roughly Sweden's bounding box - so the focus stays on geography relevant to the data rather than roads or place names.
-
-* A selection point stays fixed at the center of the screen; the user pans and zooms the map underneath it to choose a location.
-* A radius slider draws a circle (in real kilometers, not screen pixels) around that point.
-* Municipalities within the radius are listed, nearest first, using each municipality's representative point, with a fallback to an exact point-in-polygon check so the municipality actually containing the selection point is never missed. The same areas are also highlighted directly on the map: a saturated blue for areas within the radius, amber for the one the pin is actually inside of.
-* A level selector switches between municipality and county: at county level, the map shows dissolved county outlines (municipality borders merged with Shapely) and the same radius search is grouped up by county, using the whole county's population (not just the part inside the circle).
-* A population pyramid (male/female by age group) is shown for the combined population of the selected municipalities or counties.
-* A year slider - with play/pause - moves through every year of data available (2000-2024), animating the pyramid over time.
+`app.py` is a Dash application for exploring the population data geographically: pan a borders-only map of Sweden to pick a location and radius (or switch to whole counties), and see a population pyramid for that area, animated across every year of available data.
 
 Run it locally with:
 
 ```bash
 python app.py
 ```
-
-`src/scb_data/visualisation.py` also includes a Plotly choropleth map (`create_population_map`) showing population by municipality on a colour scale; it is tested independently and not currently wired into `app.py`.
 
 ## Running locally
 
@@ -194,18 +190,16 @@ The project currently provides:
 * API request batching
 * Data cleaning
 * PostgreSQL storage
-* SQL-based population queries
 * Municipality GeoJSON data
-* An interactive, borders-only map (no street tiles, restricted to Sweden) with a fixed-center selection point and radius circle
-* Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback), highlighted directly on the map as well as listed
+* An interactive, borders-only map (no street tiles, restricted to Sweden) with a fixed-center selection point and a log-scale radius ring (1-2000 km)
+* Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback), highlighted directly on the map
 * A municipality/county level selector, grouping the radius search up to whole counties
 * A population pyramid (male/female by age group) for the selected area
 * A year slider with play/pause, animating through 2000-2024
-* A standalone Plotly choropleth map (tested, not wired into the interactive app)
 * Unit and database integration tests
 * Docker-based test execution
 * GitHub Actions CI
 
 ## Roadmap
 
-No further items are currently planned.
+Possible future development includes incorporating municipality migration statistics (also available from SCB) and/or population growth prediction models.

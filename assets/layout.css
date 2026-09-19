@@ -8,9 +8,8 @@ body {
     overflow: hidden;
 }
 
-/* The map has no tile basemap (see CLAUDE.md's "Known dash-leaflet
-   findings"), so this is what shows outside Sweden's own polygons instead
-   of Leaflet's default gray. */
+/* The map has no tile basemap, so this is what shows outside Sweden's
+   own polygons instead of Leaflet's default gray. */
 .leaflet-container {
     background: #eef3f7;
 }

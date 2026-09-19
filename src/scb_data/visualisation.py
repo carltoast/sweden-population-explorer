@@ -1,4 +1,4 @@
-"""Plotly figures: municipality choropleth map and population pyramid."""
+"""Plotly figure: the population pyramid."""
 
 import math
 
@@ -14,139 +14,6 @@ import plotly.graph_objects as go
 # already satisfied by this chart's legend and hover labels.
 MALE_COLOR = "#1baf7a"
 FEMALE_COLOR = "#4a3aa7"
-
-
-def prepare_geojson(geojson: dict) -> dict:
-    """Prepare municipality GeoJSON for Plotly rendering.
-
-    Plotly's Choropleth/Scattergeo render Polygon/MultiPolygon exterior
-    rings incorrectly unless their winding order is reversed first.
-
-    Args:
-        geojson: A GeoJSON FeatureCollection of municipalities, with
-            Polygon or MultiPolygon geometries.
-
-    Returns:
-        An equivalent FeatureCollection (the input is not modified) with
-        every exterior ring's coordinate order reversed.
-    """
-    features = []
-
-    for feature in geojson["features"]:
-        feature = feature.copy()
-        geometry = feature["geometry"].copy()
-
-        if geometry["type"] == "Polygon":
-            coordinates = geometry["coordinates"].copy()
-            coordinates[0] = coordinates[0][::-1]
-            geometry["coordinates"] = coordinates
-
-        elif geometry["type"] == "MultiPolygon":
-            coordinates = []
-
-            for polygon in geometry["coordinates"]:
-                polygon = polygon.copy()
-                polygon[0] = polygon[0][::-1]
-                coordinates.append(polygon)
-
-            geometry["coordinates"] = coordinates
-
-        feature["geometry"] = geometry
-        features.append(feature)
-
-    return {
-        "type": "FeatureCollection",
-        "features": features,
-    }
-
-
-def add_municipality_boundaries(fig: go.Figure, geojson: dict) -> None:
-    """Add municipality boundary lines to a Plotly geographic figure.
-
-    Adds one Scattergeo line trace per polygon (municipalities with a
-    MultiPolygon geometry get one trace per part). Modifies fig in
-    place; features whose geometry is neither Polygon nor MultiPolygon
-    are skipped.
-
-    Args:
-        fig: Plotly figure with a geographic (geo) subplot to draw on.
-        geojson: A GeoJSON FeatureCollection of municipalities.
-    """
-    for feature in geojson["features"]:
-        geometry = feature["geometry"]
-
-        if geometry["type"] == "Polygon":
-            polygons = [geometry["coordinates"]]
-        elif geometry["type"] == "MultiPolygon":
-            polygons = geometry["coordinates"]
-        else:
-            continue
-
-        for polygon in polygons:
-            ring = polygon[0]
-
-            fig.add_trace(
-                go.Scattergeo(
-                    lon=[point[0] for point in ring],
-                    lat=[point[1] for point in ring],
-                    mode="lines",
-                    line={"color": "black", "width": 0.5},
-                    hoverinfo="skip",
-                    showlegend=False,
-                )
-            )
-
-
-def create_population_map(data: pd.DataFrame, geojson: dict) -> go.Figure:
-    """Create a choropleth map of municipal population.
-
-    Args:
-        data: Columns region_code and population, one row per
-            municipality (e.g. from scb_data.queries.get_population_by_
-            region).
-        geojson: A GeoJSON FeatureCollection of municipalities, matched
-            to data via region_code / properties.id.
-
-    Returns:
-        A figure with a Choropleth trace (population by municipality)
-        plus municipality boundary lines.
-    """
-    data = data.copy()
-    data["region_code"] = data["region_code"].astype(str)
-
-    plotly_geojson = prepare_geojson(geojson)
-
-    fig = go.Figure(
-        go.Choropleth(
-            geojson=plotly_geojson,
-            locations=data["region_code"],
-            z=data["population"],
-            featureidkey="properties.id",
-            colorscale="YlOrRd",
-            marker_line_width=0,
-            colorbar_title="Population",
-            hovertemplate=(
-                "<b>%{customdata}</b>"
-                "<br>Population: %{z:,.0f}"
-                "<extra></extra>"
-            ),
-            customdata=data["region"],
-        )
-    )
-
-    add_municipality_boundaries(fig, plotly_geojson)
-
-    fig.update_geos(
-        fitbounds="geojson",
-        visible=False,
-    )
-
-    fig.update_layout(
-        margin={"r": 0, "t": 0, "l": 0, "b": 0},
-        paper_bgcolor="white",
-    )
-
-    return fig
 
 
 def _nice_number(value: float) -> float:
@@ -203,6 +70,7 @@ def _symmetric_ticks(max_value: float) -> tuple[list[float], list[str]]:
 def create_population_pyramid(
     data: pd.DataFrame,
     axis_max: float | None = None,
+    title: str | None = None,
 ) -> go.Figure:
     """Create a population pyramid: male population left, female right.
 
@@ -216,6 +84,11 @@ def create_population_pyramid(
             (e.g. the max over every year of the selected area) rather
             than rescaling to each frame's own max. Defaults to None,
             which scales to data's own max as before.
+        title: Optional title text, set here (rather than via a
+            separate fig.update_layout call from the caller) so its
+            top margin stays coordinated with the rest of the layout
+            in one place. Defaults to None (no title), used as-is by
+            callers that don't need one (e.g. tests).
 
     Returns:
         A figure with two horizontal bar traces (male, female) sharing
@@ -267,9 +140,9 @@ def create_population_pyramid(
         max_population = max(max_population, axis_max)
     tick_values, tick_text = _symmetric_ticks(max_population)
 
-    fig.update_layout(
-        barmode="overlay",
-        xaxis={
+    layout: dict = {
+        "barmode": "overlay",
+        "xaxis": {
             "title": "Population",
             "range": [tick_values[0], tick_values[-1]],
             "tickvals": tick_values,
@@ -277,10 +150,26 @@ def create_population_pyramid(
             "gridcolor": "#e1e0d9",
             "zerolinecolor": "#c3c2b7",
         },
-        yaxis={"title": "Age group"},
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02},
-    )
+        "yaxis": {"title": "Age group"},
+        "plot_bgcolor": "white",
+        "paper_bgcolor": "white",
+        # Inside the plot area (top-left corner, over the oldest/usually
+        # shortest bars) rather than above it - saves the vertical space
+        # a separate legend row would take, and a title only needs a
+        # single line of top margin now that they no longer share it.
+        "legend": {
+            "x": 0.02,
+            "y": 0.98,
+            "xanchor": "left",
+            "yanchor": "top",
+            "bgcolor": "rgba(255, 255, 255, 0.7)",
+        },
+        "margin": {"t": 50},
+    }
+
+    if title:
+        layout["title"] = {"text": title, "x": 0.5}
+
+    fig.update_layout(**layout)
 
     return fig

@@ -3,16 +3,11 @@
 import pandas as pd
 
 from scb_data.database import (
-    check_connection,
     clear_population_table,
     create_population_table,
-    get_population_count,
+    get_connection,
     insert_population_data,
 )
-
-
-def test_check_connection():
-    assert check_connection() == 1
 
 
 def test_insert_population_data():
@@ -33,4 +28,9 @@ def test_insert_population_data():
     create_population_table()
     insert_population_data(df)
 
-    assert get_population_count() == 2
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM population;")
+            row_count = cursor.fetchone()[0]
+
+    assert row_count == 2

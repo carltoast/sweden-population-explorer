@@ -25,20 +25,6 @@ def get_connection() -> psycopg.Connection:
     )
 
 
-def check_connection() -> int:
-    """Run a trivial query to verify the database is reachable.
-
-    Returns:
-        1, if the connection and query succeeded.
-    """
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1;")
-            result = cursor.fetchone()
-
-    return result[0]
-
-
 def create_population_table() -> None:
     """Create the population table if it doesn't already exist.
 
@@ -115,22 +101,6 @@ def insert_population_data(df: pd.DataFrame) -> None:
             cursor.executemany(query, rows)
 
         connection.commit()
-
-
-def get_population_count() -> int:
-    """Count the total number of rows in the population table.
-
-    Returns:
-        The row count.
-    """
-    query = "SELECT COUNT(*) FROM population;"
-
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(query)
-            result = cursor.fetchone()
-
-    return result[0]
 
 
 def clear_population_table() -> None:

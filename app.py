@@ -1,12 +1,23 @@
 """Interactive geographic population explorer.
 
-A Dash app: the user pans/zooms a map with a fixed-center selection pin
-and a radius circle, sees which municipalities fall within that radius,
-and views a population pyramid for them at a chosen year (with
-play/pause to animate through the available years).
+A Dash app: the user pans/zooms a borders-only map of Sweden with a
+fixed screen-center marker and radius ring, sees which municipalities
+or counties fall within that radius (highlighted on the map and named
+in the population pyramid's title), and views the pyramid at a chosen
+year, with play/pause to animate through the available years.
+
+The marker and radius ring are plain CSS overlays fixed to the screen
+center, not geographic Leaflet layers - a Leaflet layer's position
+only updates back to Dash on "moveend" (see update_boundary_highlights),
+which made an earlier Leaflet-circle implementation visibly lag behind
+the cursor until a drag was released. A screen-fixed overlay has no
+such lag: its position is always the screen center by construction,
+and only its pixel size (for the ring) needs recomputing from the
+selected radius and the map's current zoom/latitude.
 """
 
 import json
+import math
 from pathlib import Path
 
 import dash_leaflet as dl
@@ -84,6 +95,7 @@ EMPTY_GEOJSON = {"type": "FeatureCollection", "features": []}
 # viewport real room to move at the default zoom too.
 SWEDEN_BOUNDS = [[47.3, -14.0], [77.1, 49.2]]
 MIN_ZOOM = 4
+INITIAL_ZOOM = 5
 
 EMPTY_PYRAMID_DATA = pd.DataFrame(
     columns=["age_code", "age_group", "sex_code", "sex", "population"]
@@ -93,7 +105,147 @@ INITIAL_LAT = 57.7089
 INITIAL_LON = 11.9746
 INITIAL_CENTER = {"lat": INITIAL_LAT, "lng": INITIAL_LON}
 INITIAL_RADIUS_KM = 10
-MAX_RADIUS_KM = 100
+
+# Sweden's own corner-to-corner distance is roughly 1,700 km, so 2000 km
+# comfortably covers the whole country from any starting point - dragging
+# the radius slider all the way up gives country-wide aggregate stats.
+MIN_RADIUS_KM = 1
+MAX_RADIUS_KM = 2000
+
+
+def radius_slider_value_to_km(slider_value: float) -> int:
+    """Convert the radius slider's raw (log-scale) value into kilometers.
+
+    The slider's own value is log10(radius_km), not radius_km itself,
+    so a small drag near the low end still gives fine control (1-10
+    km) while reaching up to MAX_RADIUS_KM at the top - a linear
+    slider over the same 1-2000 km range would make anything under
+    ~100 km nearly impossible to select precisely.
+
+    Args:
+        slider_value: The radius-slider's raw value (an exponent).
+
+    Returns:
+        The corresponding radius in kilometers, rounded to the
+        nearest whole km.
+    """
+    return round(10**slider_value)
+
+
+def radius_km_to_slider_value(radius_km: float) -> float:
+    """Convert a radius in kilometers into the slider's raw log value.
+
+    Args:
+        radius_km: A radius in kilometers.
+
+    Returns:
+        log10(radius_km): the slider's own value representation.
+    """
+    return math.log10(radius_km)
+
+
+def _meters_per_pixel(latitude: float, zoom: int) -> float:
+    """Compute Web Mercator ground resolution at a latitude and zoom.
+
+    Args:
+        latitude: Latitude, in degrees (ground resolution per pixel
+            narrows toward the poles at a given zoom, hence the
+            cosine term).
+        zoom: The map's current Leaflet zoom level.
+
+    Returns:
+        Meters of ground distance represented by one screen pixel.
+    """
+    return 156543.03392 * math.cos(math.radians(latitude)) / (2**zoom)
+
+
+def radius_km_to_px(radius_km: float, latitude: float, zoom: int) -> float:
+    """Convert a ground radius into an on-screen pixel radius.
+
+    Used to size the fixed-screen radius ring (see module docstring)
+    so it still represents the true ground distance at the map's
+    current position and zoom, despite not being a geographic layer.
+
+    Args:
+        radius_km: The selected radius, in kilometers.
+        latitude: The map center's latitude, in degrees.
+        zoom: The map's current Leaflet zoom level.
+
+    Returns:
+        The radius in screen pixels.
+    """
+    return (radius_km * 1000) / _meters_per_pixel(latitude, zoom)
+
+
+def _summarize_areas(areas: list[dict], name_key: str) -> str:
+    """Build a compact area-summary string for the pyramid's title.
+
+    Args:
+        areas: Area dicts sorted nearest-first (as returned by
+            find_municipalities_within_radius or
+            find_counties_within_radius), each with a name_key.
+        name_key: "region" for municipalities, "county" for counties.
+
+    Returns:
+        The nearest three area names, comma-separated, with a "+N
+        more" suffix if there are more than three, or "No areas
+        selected" if areas is empty.
+    """
+    if not areas:
+        return "No areas selected"
+
+    names = [area[name_key] for area in areas]
+    shown = names[:3]
+    summary = ", ".join(shown)
+    remaining = len(names) - len(shown)
+
+    if remaining > 0:
+        summary += f" +{remaining} more"
+
+    return summary
+
+
+CENTER_MARKER_STYLE = {
+    "position": "absolute",
+    "top": "50%",
+    "left": "50%",
+    "transform": "translate(-50%, -50%)",
+    "width": "10px",
+    "height": "10px",
+    "borderRadius": "50%",
+    "backgroundColor": "#2b2b2b",
+    "border": "2px solid white",
+    "boxShadow": "0 0 2px rgba(0, 0, 0, 0.6)",
+    "pointerEvents": "none",
+    "zIndex": 1001,
+}
+
+RADIUS_RING_BASE_STYLE = {
+    "position": "absolute",
+    "top": "50%",
+    "left": "50%",
+    "transform": "translate(-50%, -50%)",
+    "borderRadius": "50%",
+    "border": "2px solid #52514e",
+    "backgroundColor": "rgba(82, 81, 78, 0.08)",
+    "pointerEvents": "none",
+    "zIndex": 900,
+}
+
+INITIAL_RADIUS_PX = radius_km_to_px(
+    INITIAL_RADIUS_KM, INITIAL_LAT, INITIAL_ZOOM
+)
+
+MAP_OVERLAY_STYLE = {
+    "position": "absolute",
+    "zIndex": 1000,
+    "background": "rgba(255, 255, 255, 0.9)",
+    "padding": "0.4rem 0.9rem",
+    "borderRadius": "8px",
+    "boxShadow": "0 1px 4px rgba(0, 0, 0, 0.25)",
+}
+
+RADIUS_SLIDER_MAX = math.log10(MAX_RADIUS_KM)
 
 # The month slider below is driven by an index into this list rather than the
 # month strings themselves, since dcc.Slider needs numeric values. Fetched
@@ -108,49 +260,154 @@ PLAY_INTERVAL_MS = 800
 app = Dash(__name__)
 
 
-# Every panel below is sized with flex/minHeight-0 (not vh units on the map,
-# as before) so the whole app fills exactly one viewport - map left, stats
-# right - with no page scroll; only the municipality/county list scrolls
-# internally if it grows long.
+# No page-level title bar: once the level/radius controls float over the
+# map and the year controls sit above the pyramid, nothing was left in it.
+# The whole app is one flex row filling exactly one viewport - map left,
+# stats right - with no page scroll.
 app.layout = html.Div(
     [
+        # Left: map, with the level selector, radius slider, marker, and
+        # radius ring all floating on top of it rather than taking their
+        # own layout space.
         html.Div(
             [
-                html.H1(
-                    "Population in Swedish Municipalities",
+                dl.Map(
+                    [
+                        # No tile basemap: the map is just
+                        # municipality/county borders on a plain
+                        # background (see BOUNDARY_STYLE and
+                        # assets/layout.css's .leaflet-container rule
+                        # for the "sea" fill), swapped between the two
+                        # levels by update_boundaries_layer below.
+                        dl.GeoJSON(
+                            id="boundaries-layer",
+                            data=MUNICIPALITIES_GEOJSON,
+                            style=BOUNDARY_STYLE,
+                        ),
+                        # Stacked on top of boundaries-layer; see
+                        # update_boundary_highlights.
+                        dl.GeoJSON(
+                            id="in-radius-layer",
+                            data=EMPTY_GEOJSON,
+                            style=IN_RADIUS_STYLE,
+                        ),
+                        dl.GeoJSON(
+                            id="selected-area-layer",
+                            data=EMPTY_GEOJSON,
+                            style=SELECTED_AREA_STYLE,
+                        ),
+                    ],
+                    id="map",
+                    center=INITIAL_CENTER,
+                    zoom=INITIAL_ZOOM,
+                    minZoom=MIN_ZOOM,
+                    maxBounds=SWEDEN_BOUNDS,
+                    maxBoundsViscosity=1.0,
+                    # trackViewport (on by default) reports the map's
+                    # center/zoom/bounds back to Dash on every pan/zoom,
+                    # via this component's own "center"/"zoom" props.
+                    trackViewport=True,
+                    style={"height": "100%"},
+                ),
+
+                # Fixed screen-center marker and radius ring - see the
+                # module docstring for why these are plain CSS overlays
+                # rather than Leaflet layers.
+                html.Div(style=CENTER_MARKER_STYLE),
+                html.Div(
+                    id="radius-ring",
                     style={
-                        "fontSize": "1.15rem",
-                        "margin": 0,
-                        "whiteSpace": "nowrap",
+                        **RADIUS_RING_BASE_STYLE,
+                        "width": f"{INITIAL_RADIUS_PX}px",
+                        "height": f"{INITIAL_RADIUS_PX}px",
                     },
                 ),
 
+                # Level selector, floating top-center on the map.
+                html.Div(
+                    dcc.RadioItems(
+                        id="level-selector",
+                        options=[
+                            {"label": "County", "value": "county"},
+                            {
+                                "label": "Municipality",
+                                "value": "municipality",
+                            },
+                        ],
+                        value="county",
+                        inline=True,
+                    ),
+                    style={
+                        **MAP_OVERLAY_STYLE,
+                        "top": "0.75rem",
+                        "left": "50%",
+                        "transform": "translateX(-50%)",
+                    },
+                ),
+
+                # Radius slider, floating bottom-center on the map. A
+                # log-scale slider (see radius_slider_value_to_km) so it
+                # keeps fine control at small radii while still reaching
+                # MAX_RADIUS_KM; its own tooltip would show the raw
+                # exponent value, not km, so update_radius_label drives a
+                # plain text readout instead.
                 html.Div(
                     [
-                        html.Label("Level"),
-                        dcc.RadioItems(
-                            id="level-selector",
-                            options=[
-                                {
-                                    "label": "Municipality",
-                                    "value": "municipality",
-                                },
-                                {"label": "County", "value": "county"},
-                            ],
-                            value="municipality",
-                            inline=True,
+                        html.Div(
+                            id="radius-label",
+                            style={
+                                "textAlign": "center",
+                                "fontSize": "0.85rem",
+                                "fontWeight": 600,
+                                "marginBottom": "0.3rem",
+                            },
+                        ),
+                        dcc.Slider(
+                            id="radius-slider",
+                            min=0,
+                            max=RADIUS_SLIDER_MAX,
+                            step=0.01,
+                            value=radius_km_to_slider_value(
+                                INITIAL_RADIUS_KM
+                            ),
+                            marks={
+                                exponent: str(10**exponent)
+                                for exponent in range(
+                                    0, math.ceil(RADIUS_SLIDER_MAX) + 1
+                                )
+                            },
+                            updatemode="drag",
+                            allow_direct_input=False,
                         ),
                     ],
                     style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "gap": "0.5rem",
+                        **MAP_OVERLAY_STYLE,
+                        "bottom": "0.75rem",
+                        "left": "50%",
+                        "transform": "translateX(-50%)",
+                        "width": "18rem",
+                        "maxWidth": "90%",
                     },
+                ),
+            ],
+            style={
+                "position": "relative",
+                "flex": "1 1 60%",
+                "minWidth": 0,
+            },
+        ),
+
+        # Right: population pyramid above the year controls.
+        html.Div(
+            [
+                dcc.Graph(
+                    id="population-pyramid",
+                    style={"flex": "1 1 auto", "minHeight": 0},
+                    config={"responsive": True},
                 ),
 
                 html.Div(
                     [
-                        html.Label("Year"),
                         html.Div(
                             dcc.Slider(
                                 id="month-slider",
@@ -158,21 +415,29 @@ app.layout = html.Div(
                                 max=LATEST_MONTH_INDEX,
                                 step=1,
                                 value=LATEST_MONTH_INDEX,
-                                # Marks show the year (all available months
-                                # are December snapshots today); the full
-                                # month string is in selection-output.
+                                # Every 5th year, plus whichever is
+                                # latest even if not a multiple of 5 -
+                                # a mark per year (25 of them) was
+                                # illegibly cramped into this width.
+                                # The exact year is still always known
+                                # from the handle's own position/the
+                                # pyramid's title, so sparse marks are
+                                # just orientation, not the only cue.
                                 marks={
                                     i: month[:4]
                                     for i, month in enumerate(
                                         AVAILABLE_MONTHS
                                     )
+                                    if int(month[:4]) % 5 == 0
+                                    or i == LATEST_MONTH_INDEX
                                 },
+                                allow_direct_input=False,
                             ),
-                            style={"width": "18rem"},
+                            style={"flex": "1 1 auto"},
                         ),
                         html.Button("Play", id="play-button", n_clicks=0),
-                        # Renders nothing; just fires on a timer while not
-                        # disabled.
+                        # Renders nothing; just fires on a timer while
+                        # not disabled.
                         dcc.Interval(
                             id="play-interval",
                             interval=PLAY_INTERVAL_MS,
@@ -183,181 +448,22 @@ app.layout = html.Div(
                         "display": "flex",
                         "alignItems": "center",
                         "gap": "0.75rem",
-                        "flex": "1 1 auto",
+                        "padding": "0.75rem 1rem",
+                        "flex": "0 0 auto",
                     },
                 ),
             ],
             style={
+                "flex": "1 1 40%",
                 "display": "flex",
-                "alignItems": "center",
-                "gap": "2rem",
-                "padding": "0.5rem 1rem",
-                "borderBottom": "1px solid #ddd",
-                "flex": "0 0 auto",
-            },
-        ),
-
-        html.Div(
-            [
-                # Left: map + radius slider.
-                html.Div(
-                    [
-                        html.Div(
-                            [
-                                dl.Map(
-                                    [
-                                        # No tile basemap: the map is just
-                                        # municipality/county borders on a
-                                        # plain background (see
-                                        # BOUNDARY_STYLE and
-                                        # assets/layout.css's
-                                        # .leaflet-container rule for the
-                                        # "sea" fill), swapped between the
-                                        # two levels by
-                                        # update_boundaries_layer below.
-                                        dl.GeoJSON(
-                                            id="boundaries-layer",
-                                            data=MUNICIPALITIES_GEOJSON,
-                                            style=BOUNDARY_STYLE,
-                                        ),
-                                        # Stacked on top of boundaries-layer;
-                                        # see update_boundary_highlights.
-                                        dl.GeoJSON(
-                                            id="in-radius-layer",
-                                            data=EMPTY_GEOJSON,
-                                            style=IN_RADIUS_STYLE,
-                                        ),
-                                        dl.GeoJSON(
-                                            id="selected-area-layer",
-                                            data=EMPTY_GEOJSON,
-                                            style=SELECTED_AREA_STYLE,
-                                        ),
-                                        dl.Circle(
-                                            id="radius-circle",
-                                            center=INITIAL_CENTER,
-                                            radius=INITIAL_RADIUS_KM * 1000,
-                                        ),
-                                    ],
-                                    id="map",
-                                    center=INITIAL_CENTER,
-                                    zoom=5,
-                                    minZoom=MIN_ZOOM,
-                                    maxBounds=SWEDEN_BOUNDS,
-                                    maxBoundsViscosity=1.0,
-                                    # trackViewport (on by default) reports
-                                    # the map's center/zoom/bounds back to
-                                    # Dash on every pan/zoom, via this
-                                    # component's own "center" prop.
-                                    trackViewport=True,
-                                    style={"height": "100%"},
-                                ),
-
-                                # The selection point is a fixed
-                                # screen-center overlay, not a real Leaflet
-                                # marker: it never moves on screen, the user
-                                # pans/zooms the map underneath it, and its
-                                # geographic position is simply the map's
-                                # current center (see callback).
-                                html.Div(
-                                    "📍",
-                                    style={
-                                        "position": "absolute",
-                                        "top": "50%",
-                                        "left": "50%",
-                                        "transform": (
-                                            "translate(-50%, -100%)"
-                                        ),
-                                        "fontSize": "32px",
-                                        "pointerEvents": "none",
-                                        "zIndex": "1000",
-                                    },
-                                ),
-                            ],
-                            style={
-                                "position": "relative",
-                                "flex": "1 1 auto",
-                                "minHeight": 0,
-                            },
-                        ),
-
-                        html.Div(
-                            [
-                                html.Label("Radius (km)"),
-                                dcc.Slider(
-                                    id="radius-slider",
-                                    min=1,
-                                    max=MAX_RADIUS_KM,
-                                    step=1,
-                                    value=INITIAL_RADIUS_KM,
-                                    marks={
-                                        km: str(km)
-                                        for km in range(
-                                            0, MAX_RADIUS_KM + 1, 20
-                                        )
-                                    },
-                                    tooltip={
-                                        "placement": "bottom",
-                                        "always_visible": True,
-                                    },
-                                ),
-                            ],
-                            style={
-                                "padding": "0.5rem 1.5rem",
-                                "flex": "0 0 auto",
-                            },
-                        ),
-                    ],
-                    style={
-                        "flex": "1 1 60%",
-                        "display": "flex",
-                        "flexDirection": "column",
-                        "minWidth": 0,
-                        "minHeight": 0,
-                    },
-                ),
-
-                # Right: selection summary, area list, population pyramid.
-                html.Div(
-                    [
-                        html.Div(
-                            "No selection yet",
-                            id="selection-output",
-                            style={"flex": "0 0 auto"},
-                        ),
-
-                        html.Div(
-                            id="municipalities-output",
-                            # A fixed height (rather than a percentage of
-                            # the flex column) so it reliably scrolls
-                            # internally instead of clipping when the list
-                            # is long or the viewport is short.
-                            style={
-                                "flex": "0 0 10rem",
-                                "overflowY": "auto",
-                            },
-                        ),
-
-                        dcc.Graph(
-                            id="population-pyramid",
-                            style={"flex": "1 1 auto", "minHeight": 0},
-                            config={"responsive": True},
-                        ),
-                    ],
-                    style={
-                        "flex": "1 1 40%",
-                        "display": "flex",
-                        "flexDirection": "column",
-                        "minWidth": 0,
-                        "minHeight": 0,
-                        "padding": "0.5rem 1rem",
-                        "overflow": "hidden",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "flex": "1 1 auto",
+                "flexDirection": "column",
+                "minWidth": 0,
                 "minHeight": 0,
+                # Bottom padding clears Dash's own dev-mode debug menu
+                # (bottom-right "Callbacks/Errors/..." bar, shown when
+                # app.run(debug=True)), which otherwise overlaps the
+                # year controls sitting flush with the viewport bottom.
+                "padding": "0 1rem 4.5rem 1rem",
                 "overflow": "hidden",
             },
         ),
@@ -365,50 +471,10 @@ app.layout = html.Div(
     style={
         "height": "100vh",
         "display": "flex",
-        "flexDirection": "column",
         "overflow": "hidden",
         "fontFamily": "system-ui, -apple-system, 'Segoe UI', sans-serif",
     },
 )
-
-
-@app.callback(
-    Output("selection-output", "children"),
-    Input("map", "center"),
-    Input("radius-slider", "value"),
-    Input("month-slider", "value"),
-)
-def display_selection(
-    center: dict | None,
-    radius_km: int,
-    month_index: int,
-) -> str | html.Div:
-    """Show the current selection point, radius, and year as plain text.
-
-    Args:
-        center: The map's current center, as {"lat": ..., "lng": ...},
-            or None before the map has reported one.
-        radius_km: The selected radius, in kilometers.
-        month_index: Index into AVAILABLE_MONTHS for the selected year.
-
-    Returns:
-        A placeholder message if center is None, otherwise a div listing
-        latitude, longitude, radius, and month.
-    """
-    if not center:
-        return "No selection yet"
-
-    lat = center.get("lat")
-    lon = center.get("lng")
-
-    return html.Div(
-        [
-            html.Div(f"Latitude: {lat}"),
-            html.Div(f"Longitude: {lon}"),
-            html.Div(f"Radius: {radius_km} km"),
-            html.Div(f"Month: {AVAILABLE_MONTHS[month_index]}"),
-        ]
-    )
 
 
 @app.callback(
@@ -488,7 +554,7 @@ def update_boundaries_layer(level: str) -> dict:
 )
 def update_boundary_highlights(
     center: dict | None,
-    radius_km: int,
+    radius_slider_value: float,
     level: str,
 ) -> tuple[dict, dict]:
     """Highlight in-radius areas and the one the pin is actually inside.
@@ -496,7 +562,7 @@ def update_boundary_highlights(
     Args:
         center: The map's current center, as {"lat": ..., "lng": ...},
             or None before the map has reported one.
-        radius_km: The selected radius, in kilometers.
+        radius_slider_value: The radius-slider's raw (log-scale) value.
         level: "municipality" or "county" (the level-selector's value).
 
     Returns:
@@ -508,6 +574,8 @@ def update_boundary_highlights(
     """
     if not center:
         return EMPTY_GEOJSON, EMPTY_GEOJSON
+
+    radius_km = radius_slider_value_to_km(radius_slider_value)
 
     if level == "county":
         areas = find_counties_within_radius(
@@ -555,100 +623,60 @@ def update_boundary_highlights(
 
 
 @app.callback(
-    Output("radius-circle", "center"),
-    Output("radius-circle", "radius"),
+    Output("radius-ring", "style"),
     Input("map", "center"),
+    Input("map", "zoom"),
     Input("radius-slider", "value"),
 )
-def update_radius_circle(
+def update_radius_ring(
     center: dict | None,
-    radius_km: int,
-) -> tuple[dict, int]:
-    """Keep the radius circle centered on the map with the selected radius.
+    zoom: int | None,
+    radius_slider_value: float,
+) -> dict:
+    """Resize the fixed-screen radius ring to match the selected radius.
+
+    The ring's position never lags behind a map drag (see module
+    docstring) since it's screen-fixed by construction; only its
+    pixel size needs recomputing here, from the selected radius and
+    the map's current zoom/latitude.
 
     Args:
         center: The map's current center, as {"lat": ..., "lng": ...},
             or None before the map has reported one.
-        radius_km: The selected radius, in kilometers.
+        zoom: The map's current zoom level, or None before reported.
+        radius_slider_value: The radius-slider's raw (log-scale) value.
 
     Returns:
-        The circle's new (center, radius_in_meters), falling back to
-        INITIAL_CENTER if center is None.
+        RADIUS_RING_BASE_STYLE with width/height set to the radius's
+        current on-screen pixel diameter.
     """
-    if not center:
-        center = INITIAL_CENTER
+    latitude = center["lat"] if center else INITIAL_LAT
+    radius_km = radius_slider_value_to_km(radius_slider_value)
+    diameter_px = 2 * radius_km_to_px(
+        radius_km, latitude, zoom or INITIAL_ZOOM
+    )
 
-    return center, radius_km * 1000
+    return {
+        **RADIUS_RING_BASE_STYLE,
+        "width": f"{diameter_px}px",
+        "height": f"{diameter_px}px",
+    }
 
 
 @app.callback(
-    Output("municipalities-output", "children"),
-    Input("map", "center"),
+    Output("radius-label", "children"),
     Input("radius-slider", "value"),
-    Input("level-selector", "value"),
 )
-def display_municipalities(
-    center: dict | None,
-    radius_km: int,
-    level: str,
-) -> html.Div | None:
-    """List the municipalities or counties within the selected radius.
+def update_radius_label(radius_slider_value: float) -> str:
+    """Show the current radius in kilometers next to its slider.
 
     Args:
-        center: The map's current center, as {"lat": ..., "lng": ...},
-            or None before the map has reported one.
-        radius_km: The selected radius, in kilometers.
-        level: "municipality" or "county" (the level-selector's value).
+        radius_slider_value: The radius-slider's raw (log-scale) value.
 
     Returns:
-        None if center is None, a "none within radius" message if the
-        radius contains none at the chosen level, or a div with a count
-        and a bullet list (nearest first, distance in km, flagging any
-        area whose actual boundary contains the selected point).
+        "Radius: {km} km".
     """
-    if not center:
-        return None
-
-    if level == "county":
-        areas = find_counties_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
-        noun = "counties"
-        name_key = "county"
-    else:
-        areas = find_municipalities_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
-        noun = "municipalities"
-        name_key = "region"
-
-    if not areas:
-        return html.Div(f"No {noun} within radius")
-
-    return html.Div(
-        [
-            html.Div(f"{len(areas)} {noun} within radius:"),
-            html.Ul(
-                [
-                    html.Li(
-                        f"{area[name_key]} ({area['distance_km']:.1f} km)"
-                        + (
-                            " — contains selected point"
-                            if area["contains_point"]
-                            else ""
-                        )
-                    )
-                    for area in areas
-                ]
-            ),
-        ]
-    )
+    return f"Radius: {radius_slider_value_to_km(radius_slider_value)} km"
 
 
 @app.callback(
@@ -660,7 +688,7 @@ def display_municipalities(
 )
 def update_population_pyramid(
     center: dict | None,
-    radius_km: int,
+    radius_slider_value: float,
     month_index: int,
     level: str,
 ) -> go.Figure:
@@ -669,50 +697,59 @@ def update_population_pyramid(
     Args:
         center: The map's current center, as {"lat": ..., "lng": ...},
             or None before the map has reported one.
-        radius_km: The selected radius, in kilometers.
+        radius_slider_value: The radius-slider's raw (log-scale) value.
         month_index: Index into AVAILABLE_MONTHS for the selected year.
         level: "municipality" or "county" (the level-selector's value).
             At "county", the pyramid covers every municipality in each
             matched county, not just the ones inside the radius.
 
     Returns:
-        An empty pyramid if center is None or no areas fall within the
-        radius at the chosen level, otherwise the population pyramid
-        summed across those areas for the selected year, with the
-        x-axis fixed to the largest value seen across every year of
-        the current selection so the axis doesn't rescale as the year
+        The population pyramid for the selected areas and year (empty
+        if center is None or nothing matches), titled with the nearest
+        area names (see _summarize_areas) - the year is already shown
+        by the year slider itself, so it isn't repeated here - with
+        the x-axis fixed to the largest value seen across every year
+        of the current selection so it doesn't rescale as the year
         slider or play/pause moves through months.
     """
-    if not center:
-        return create_population_pyramid(EMPTY_PYRAMID_DATA)
-
-    if level == "county":
-        counties = find_counties_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
-        region_codes = [
-            code for county in counties for code in county["region_codes"]
-        ]
-    else:
-        municipalities = find_municipalities_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
-        region_codes = [m["region_code"] for m in municipalities]
-
-    if not region_codes:
-        return create_population_pyramid(EMPTY_PYRAMID_DATA)
-
     month = AVAILABLE_MONTHS[month_index]
-    pyramid_data = get_population_pyramid(region_codes, month)
-    axis_max = get_max_pyramid_value(region_codes)
+    areas: list[dict] = []
+    region_codes: list[str] = []
+    name_key = "region"
 
-    return create_population_pyramid(pyramid_data, axis_max=axis_max)
+    if center:
+        radius_km = radius_slider_value_to_km(radius_slider_value)
+
+        if level == "county":
+            areas = find_counties_within_radius(
+                latitude=center["lat"],
+                longitude=center["lng"],
+                radius_km=radius_km,
+                geojson=MUNICIPALITIES_GEOJSON,
+            )
+            name_key = "county"
+            region_codes = [
+                code for area in areas for code in area["region_codes"]
+            ]
+        else:
+            areas = find_municipalities_within_radius(
+                latitude=center["lat"],
+                longitude=center["lng"],
+                radius_km=radius_km,
+                geojson=MUNICIPALITIES_GEOJSON,
+            )
+            region_codes = [area["region_code"] for area in areas]
+
+    title = _summarize_areas(areas, name_key)
+
+    if region_codes:
+        pyramid_data = get_population_pyramid(region_codes, month)
+        axis_max = get_max_pyramid_value(region_codes)
+        return create_population_pyramid(
+            pyramid_data, axis_max=axis_max, title=title
+        )
+
+    return create_population_pyramid(EMPTY_PYRAMID_DATA, title=title)
 
 
 if __name__ == "__main__":

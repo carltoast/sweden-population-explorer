@@ -216,6 +216,51 @@ def _summarize_areas(areas: list[dict], name_key: str) -> str:
     return summary
 
 
+def _wrap_title(summary: str, max_line_length: int = 35) -> str:
+    """Insert a line break into a long area summary for a chart title.
+
+    Plotly chart titles don't wrap on their own, so a summary with
+    several long names (e.g. three counties like "Västra Götalands
+    län, Hallands län, Jönköpings län") can run past the right
+    column's width instead of staying centered - this only matters
+    for titles (which render "<br>" as a real line break); it's not
+    used for the Sankey's plain-text node labels, which don't.
+
+    Args:
+        summary: An area summary (e.g. from _summarize_areas), a
+            comma-separated list of names with an optional "+N more"
+            suffix.
+        max_line_length: Roughly how many characters fit on one line
+            before wrapping. Defaults to 35.
+
+    Returns:
+        summary unchanged if it's already short enough, otherwise the
+        same text with a "<br>" inserted after the last
+        comma-separated part that still fits within max_line_length,
+        so it wraps onto a second line instead of overflowing
+        horizontally. Unchanged if even the first part alone exceeds
+        max_line_length - there's nothing useful to split there.
+    """
+    if len(summary) <= max_line_length:
+        return summary
+
+    parts = summary.split(", ")
+    first_line = parts[0]
+
+    for part in parts[1:]:
+        candidate = f"{first_line}, {part}"
+        if len(candidate) > max_line_length:
+            break
+        first_line = candidate
+
+    remaining = summary[len(first_line):].lstrip(", ")
+
+    if not remaining:
+        return summary
+
+    return f"{first_line}<br>{remaining}"
+
+
 def _find_selected_areas(
     center: dict | None,
     radius_km: float,
@@ -486,6 +531,11 @@ app.layout = html.Div(
         # belonging to just one.
         html.Div(
             [
+                # No visual role - just a clientside-callback target (see
+                # the "resize" trigger below), since a Dash Output always
+                # needs a real component property to write to.
+                dcc.Store(id="tab-resize-trigger"),
+
                 dcc.Tabs(
                     id="view-tabs",
                     value="pyramid",
@@ -521,7 +571,7 @@ app.layout = html.Div(
                             ],
                         ),
                         dcc.Tab(
-                            label="Population Trend",
+                            label="Population Over Time",
                             value="trend",
                             children=[
                                 dcc.Graph(
@@ -706,6 +756,33 @@ def toggle_year_controls(active_tab: str) -> dict:
         return {**YEAR_CONTROLS_STYLE, "display": "none"}
 
     return YEAR_CONTROLS_STYLE
+
+
+# Switching to the trend tab hides year-controls (see toggle_year_controls
+# above), which frees up real vertical space for that tab's Graph to grow
+# into via its own "flex: 1 1 auto" - but Plotly's responsive resizing
+# (config={"responsive": True}) only re-measures its container on the
+# browser's own "resize" event, not on an arbitrary flexbox reflow caused
+# by a sibling disappearing. Without this, the chart kept whatever pixel
+# size it last measured and just left blank space in the now-taller
+# container - a real bug caught by comparing the trend tab's rendered
+# chart height against the visible gap beneath it, not by any unit test
+# (there's no Dash callback test harness in this project - see CLAUDE.md).
+# Dispatching a synthetic "resize" event after the layout settles makes
+# Plotly re-measure and fill the space, on every tab switch (harmless on
+# tabs where nothing actually changed size).
+app.clientside_callback(
+    """
+    function(activeTab) {
+        window.setTimeout(function() {
+            window.dispatchEvent(new Event("resize"));
+        }, 50);
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("tab-resize-trigger", "data"),
+    Input("view-tabs", "value"),
+)
 
 
 @app.callback(
@@ -917,7 +994,7 @@ def update_population_pyramid(
     areas, region_codes, name_key = _find_selected_areas(
         center, radius_km, level
     )
-    title = _summarize_areas(areas, name_key)
+    title = _wrap_title(_summarize_areas(areas, name_key))
 
     if region_codes:
         pyramid_data = get_population_pyramid(region_codes, month)
@@ -961,7 +1038,7 @@ def update_population_trend(
     areas, region_codes, name_key = _find_selected_areas(
         center, radius_km, level
     )
-    title = _summarize_areas(areas, name_key)
+    title = _wrap_title(_summarize_areas(areas, name_key))
 
     if region_codes:
         trend_data = get_population_trend(region_codes)
@@ -1021,7 +1098,13 @@ def update_migration_sankey(
     flows = get_migration_flows(lan_codes, year)
 
     return create_migration_sankey(
-        flows, direction=direction, area_label=area_label, title=area_label
+        flows,
+        direction=direction,
+        # area_label (unwrapped) feeds the Sankey's own node label,
+        # which is plain SVG text with no "<br>" support, unlike the
+        # figure title - see _wrap_title.
+        area_label=area_label,
+        title=_wrap_title(area_label),
     )
 
 

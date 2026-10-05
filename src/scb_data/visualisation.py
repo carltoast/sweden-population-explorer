@@ -24,6 +24,46 @@ FEMALE_COLOR = "#4a3aa7"
 TREND_COLOR = "#2a78d6"
 
 
+def _wrap_caption(text: str, max_line_length: int = 52) -> str:
+    """Greedily word-wrap plain text onto multiple lines via "<br>".
+
+    Used for the trend chart's caption, which sits in a narrower
+    column than a chart title does - a single long line (even after
+    one manually-placed "<br>") was measured overflowing the plot
+    container horizontally on both sides, so line breaks are now
+    computed from actual word lengths instead of guessed by hand.
+
+    Args:
+        text: Plain caption text, with no existing "<br>" tags.
+        max_line_length: Target character count per line. Chosen
+            conservatively relative to the ~560px plot width measured
+            during verification, so the wrapped text still fits in
+            narrower browser windows too.
+
+    Returns:
+        text with a "<br>" inserted after as many whole words fit
+        within max_line_length, repeated until every word is placed.
+        A single word longer than max_line_length is kept on its own
+        line rather than split mid-word.
+    """
+    words = text.split(" ")
+    lines = []
+    current = ""
+
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_line_length:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+
+    if current:
+        lines.append(current)
+
+    return "<br>".join(lines)
+
+
 def _nice_number(value: float) -> float:
     """Round up to a visually clean number (1/2/5 x a power of ten).
 
@@ -267,10 +307,12 @@ def create_population_trend(
             # themselves whether +1.3%/year sounds like a reasonable
             # continuation of the trend they're looking at.
             annual_growth_pct = (math.exp(growth_rate) - 1) * 100
-            caption = (
-                f"Projection: {annual_growth_pct:+.1f}%/year compound "
-                f"growth, fit to {years.iloc[0]}–{last_year} data<br>"
-                "Simple model - not a rigorous forecast."
+            caption = _wrap_caption(
+                f"Projection assumes the {years.iloc[0]}-"
+                f"{last_year} average annual growth rate "
+                f"({annual_growth_pct:+.1f}%/year) continues unchanged "
+                "and is a rough estimation. Real population growth "
+                "depends on more factors."
             )
 
     layout: dict = {
@@ -302,10 +344,14 @@ def create_population_trend(
         # outside a too-small margin and get silently clipped - a
         # generous fixed margin plus a shallower fraction keeps it
         # inside the figure regardless of the plot's actual height.
-        # (The caption grew from one line to two - "simple model"
-        # disclaimer added below the fitted-rate line - so this has
-        # extra headroom built in versus the single-line case.)
-        "margin": {"t": 50, "b": 135},
+        # (y is now further below the axis than it first was - the
+        # caption originally sat crowded right up against the "Year"
+        # axis title - so this has more headroom built in than that
+        # single-line case needed.) The caption now wraps onto more,
+        # shorter lines via _wrap_caption (to fix a horizontal overflow
+        # - see that function's docstring), so a bit more bottom margin
+        # than a two-line caption needed is reserved here too.
+        "margin": {"t": 50, "b": 195},
     }
 
     if title:
@@ -319,7 +365,7 @@ def create_population_trend(
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
-                "y": -0.13,
+                "y": -0.24,
                 "xanchor": "center",
                 "yanchor": "top",
                 "font": {"size": 12, "color": "#898781"},
@@ -343,6 +389,54 @@ def create_population_trend(
 SANKEY_SELECTED_COLOR = "#f2a900"
 SANKEY_OTHER_COLOR = "#c3c2b7"
 SANKEY_LINK_COLOR = "rgba(242, 169, 0, 0.35)"
+
+
+def _create_empty_migration_figure(title: str | None) -> go.Figure:
+    """Build a plain "no data" placeholder for the migration tab.
+
+    Used instead of a Sankey with a single node and no links, which
+    is a well-formed Plotly figure in Python but crashes plotly.js's
+    underlying d3-sankey layout in the browser - see
+    create_migration_sankey's docstring.
+
+    Args:
+        title: Optional title text, applied the same way
+            create_migration_sankey would apply it.
+
+    Returns:
+        A figure with no traces and a centered message explaining
+        there's nothing outside the selected area to measure
+        migration against.
+    """
+    fig = go.Figure()
+    layout: dict = {
+        "paper_bgcolor": "white",
+        "plot_bgcolor": "white",
+        "xaxis": {"visible": False},
+        "yaxis": {"visible": False},
+        "margin": {"t": 50, "l": 10, "r": 10, "b": 10},
+        "annotations": [
+            {
+                "text": (
+                    "No migration data to show - every county is "
+                    "already part of the selected area."
+                ),
+                "showarrow": False,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": 0.5,
+                "font": {"size": 13, "color": "#898781"},
+            }
+        ],
+    }
+
+    if title:
+        layout["title"] = {"text": title, "x": 0.5}
+
+    fig.update_layout(**layout)
+
+    return fig
 
 
 def create_migration_sankey(
@@ -383,9 +477,17 @@ def create_migration_sankey(
         "Other counties" node. Node positions are fixed (not
         user-draggable) and hovering shows nothing - every value
         that matters is already a permanent label, not something the
-        reader has to find by hovering. Just the "Selected area" node,
-        with no links, if data is empty or every flow in the
-        requested direction is zero.
+        reader has to find by hovering. If data is empty or every
+        flow in the requested direction is zero (e.g. the radius
+        currently covers every county, leaving no "outside" to
+        measure against), a plain message is shown instead of a
+        Sankey with a single floating node - plotly.js's underlying
+        d3-sankey layout throws a real "Invalid array length" error
+        for a one-node, zero-link Sankey (confirmed via manual
+        browser testing; not caught by a figure-shape-only unit
+        test, since the Python object itself is perfectly
+        well-formed - the crash is in the JS layout step), so that
+        degenerate shape is avoided entirely rather than tolerated.
     """
     value_column = "inflow" if direction == "to" else "outflow"
     flows = data[data[value_column] > 0].sort_values(
@@ -407,6 +509,9 @@ def create_migration_sankey(
             f"Other counties ({len(folded)}) ({folded_total:,.0f})"
         )
         values.append(folded_total)
+
+    if not county_labels:
+        return _create_empty_migration_figure(title)
 
     area_total = flows[value_column].sum()
     node_labels = [f"{area_label} ({area_total:,.0f})"] + county_labels

@@ -227,10 +227,12 @@ def test_create_population_trend_caption_states_rate_and_year_range():
 
     caption = fig.layout.annotations[0].text
 
-    assert caption.startswith("Projection:")
-    assert "%/year compound growth" in caption
-    assert "fit to 2020–2024 data" in caption
-    assert "Simple model" in caption
+    assert caption.startswith("Projection assumes")
+    assert "2020" in caption
+    assert "2024" in caption
+    assert "%/year)" in caption
+    assert "rough estimation" in caption
+    assert "—" not in caption
 
 
 def test_create_population_trend_handles_empty_data():
@@ -356,16 +358,47 @@ def test_create_migration_sankey_selected_area_is_first_node():
 
 
 def test_create_migration_sankey_handles_empty_data():
+    # A single-node, zero-link Sankey is a well-formed Plotly figure
+    # in Python but crashes plotly.js's d3-sankey layout in a real
+    # browser ("Invalid array length") - so this case must *not*
+    # produce a go.Sankey trace at all, only a plain message.
     fig = create_migration_sankey(
         pd.DataFrame(columns=["lan_code", "inflow", "outflow"]),
         direction="to",
         area_label="Selected",
     )
 
-    sankey = fig.data[0]
+    assert not any(isinstance(trace, go.Sankey) for trace in fig.data)
+    assert len(fig.layout.annotations) == 1
+    assert "No migration data" in fig.layout.annotations[0].text
 
-    assert list(sankey.node.label) == ["Selected (0)"]
-    assert len(sankey.link.value) == 0
+
+def test_create_migration_sankey_handles_fully_selected_area():
+    # Every row has a zero value in the requested direction (e.g. the
+    # radius covers all counties, so nothing flows from "outside").
+    data = pd.DataFrame(
+        {
+            "lan_code": ["03", "04"],
+            "inflow": [0, 0],
+            "outflow": [100, 50],
+        }
+    )
+
+    fig = create_migration_sankey(data, direction="to", area_label="Sel")
+
+    assert not any(isinstance(trace, go.Sankey) for trace in fig.data)
+    assert len(fig.layout.annotations) == 1
+
+
+def test_create_migration_sankey_empty_data_sets_title_when_given():
+    fig = create_migration_sankey(
+        pd.DataFrame(columns=["lan_code", "inflow", "outflow"]),
+        direction="to",
+        area_label="Selected",
+        title="Selected",
+    )
+
+    assert fig.layout.title.text == "Selected"
 
 
 def test_create_migration_sankey_sets_title_when_given():

@@ -4,7 +4,7 @@ This is a personal project to gain hands-on experience with the full lifecycle o
 
 This project was developed with the assistance of Claude Code.
 
-![Demo: exploring population data from a Västra Götaland county overview down to Borgholm municipality](docs/demo.gif)
+![Demo](docs/demo.gif)
 
 ## Current pipeline
 

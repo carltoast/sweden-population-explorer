@@ -2,9 +2,11 @@
 
 A Dash app: the user pans/zooms a borders-only map of Sweden with a
 fixed screen-center marker and radius ring, sees which municipalities
-or counties fall within that radius (highlighted on the map and named
-in the population pyramid's title), and views the pyramid at a chosen
-year, with play/pause to animate through the available years.
+or counties fall within that radius (highlighted on the map), and
+explores their population across three tabs: a pyramid at a chosen
+year (with play/pause to animate through the available years), a
+population-over-time trend with a growth projection, and (pending a
+region-to-region data source) migration statistics.
 
 The marker and radius ring are plain CSS overlays fixed to the screen
 center, not geographic Leaflet layers - a Leaflet layer's position
@@ -35,8 +37,12 @@ from scb_data.queries import (
     get_available_months,
     get_max_pyramid_value,
     get_population_pyramid,
+    get_population_trend,
 )
-from scb_data.visualisation import create_population_pyramid
+from scb_data.visualisation import (
+    create_population_pyramid,
+    create_population_trend,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -100,6 +106,7 @@ INITIAL_ZOOM = 5
 EMPTY_PYRAMID_DATA = pd.DataFrame(
     columns=["age_code", "age_group", "sex_code", "sex", "population"]
 )
+EMPTY_TREND_DATA = pd.DataFrame(columns=["month", "population"])
 
 INITIAL_LAT = 57.7089
 INITIAL_LON = 11.9746
@@ -205,6 +212,61 @@ def _summarize_areas(areas: list[dict], name_key: str) -> str:
     return summary
 
 
+def _find_selected_areas(
+    center: dict | None,
+    radius_km: float,
+    level: str,
+) -> tuple[list[dict], list[str], str]:
+    """Resolve the current pin+radius+level selection into areas/codes.
+
+    Shared by every callback that needs "what's currently selected"
+    (the map highlight layers, the pyramid, and the trend chart) so
+    they can't disagree about it - each still runs its own copy of
+    this lookup rather than sharing a cached result, consistent with
+    how this app's callbacks are structured generally.
+
+    Args:
+        center: The map's current center, as {"lat": ..., "lng": ...},
+            or None before the map has reported one.
+        radius_km: The selected radius, in kilometers.
+        level: "municipality" or "county" (the level-selector's
+            value).
+
+    Returns:
+        A (areas, region_codes, name_key) triple: areas as returned by
+        find_municipalities_within_radius/find_counties_within_radius,
+        the flat list of municipality region_codes to query population
+        for (every municipality in each matched county, at "county"
+        level), and name_key ("region" or "county") for area display
+        names - areas and region_codes are empty, name_key is
+        "region", if center is None.
+    """
+    if not center:
+        return [], [], "region"
+
+    if level == "county":
+        areas = find_counties_within_radius(
+            latitude=center["lat"],
+            longitude=center["lng"],
+            radius_km=radius_km,
+            geojson=MUNICIPALITIES_GEOJSON,
+        )
+        region_codes = [
+            code for area in areas for code in area["region_codes"]
+        ]
+        return areas, region_codes, "county"
+
+    areas = find_municipalities_within_radius(
+        latitude=center["lat"],
+        longitude=center["lng"],
+        radius_km=radius_km,
+        geojson=MUNICIPALITIES_GEOJSON,
+    )
+    region_codes = [area["region_code"] for area in areas]
+
+    return areas, region_codes, "region"
+
+
 CENTER_MARKER_STYLE = {
     "position": "absolute",
     "top": "50%",
@@ -247,6 +309,17 @@ MAP_OVERLAY_STYLE = {
 
 RADIUS_SLIDER_MAX = math.log10(MAX_RADIUS_KM)
 
+# Hidden on the "trend" tab (via toggle_year_controls) since that tab plots
+# every year at once rather than one at a time - the year slider/play
+# button have nothing to do there.
+YEAR_CONTROLS_STYLE = {
+    "display": "flex",
+    "alignItems": "center",
+    "gap": "0.75rem",
+    "padding": "0.75rem 1rem",
+    "flex": "0 0 auto",
+}
+
 # The month slider below is driven by an index into this list rather than the
 # month strings themselves, since dcc.Slider needs numeric values. Fetched
 # once at startup rather than hardcoded, so it reflects whatever months the
@@ -257,7 +330,12 @@ LATEST_MONTH_INDEX = len(AVAILABLE_MONTHS) - 1
 PLAY_INTERVAL_MS = 800
 
 
-app = Dash(__name__)
+# suppress_callback_exceptions: dcc.Tabs only mounts the *active* tab's
+# children, so "population-trend" (inside the non-default "trend" tab)
+# doesn't exist in the initial layout - without this, Dash's startup
+# validation rejects update_population_trend's Output as referring to a
+# nonexistent component.
+app = Dash(__name__, suppress_callback_exceptions=True)
 
 
 # No page-level title bar: once the level/radius controls float over the
@@ -397,17 +475,81 @@ app.layout = html.Div(
             },
         ),
 
-        # Right: population pyramid above the year controls.
+        # Right: a tabbed view (pyramid / trend / migration) above the
+        # year controls. The year slider stays outside the Tabs, below
+        # them, since it's relevant to more than one tab (the pyramid's
+        # year, and eventually the migration tab's year) rather than
+        # belonging to just one.
         html.Div(
             [
-                dcc.Graph(
-                    id="population-pyramid",
-                    style={"flex": "1 1 auto", "minHeight": 0},
-                    config={"responsive": True},
+                dcc.Tabs(
+                    id="view-tabs",
+                    value="pyramid",
+                    style={"flex": "0 0 auto"},
+                    parent_style={
+                        "flex": "1 1 auto",
+                        "minHeight": 0,
+                        "display": "flex",
+                        "flexDirection": "column",
+                    },
+                    # content_style governs the shared wrapper div Dash
+                    # renders the *active* tab's children into - making
+                    # that a flex container (not each dcc.Tab's own
+                    # "style", which is the clickable tab-header button,
+                    # not its content pane) is what lets a tab's Graph
+                    # fill the remaining height below the tab bar.
+                    content_style={
+                        "flex": "1 1 auto",
+                        "minHeight": 0,
+                        "display": "flex",
+                        "flexDirection": "column",
+                    },
+                    children=[
+                        dcc.Tab(
+                            label="Population Pyramid",
+                            value="pyramid",
+                            children=[
+                                dcc.Graph(
+                                    id="population-pyramid",
+                                    style={"flex": "1 1 auto"},
+                                    config={"responsive": True},
+                                ),
+                            ],
+                        ),
+                        dcc.Tab(
+                            label="Population Trend",
+                            value="trend",
+                            children=[
+                                dcc.Graph(
+                                    id="population-trend",
+                                    style={"flex": "1 1 auto"},
+                                    config={"responsive": True},
+                                ),
+                            ],
+                        ),
+                        dcc.Tab(
+                            label="Migration",
+                            value="migration",
+                            children=[
+                                html.Div(
+                                    "Migration statistics are coming "
+                                    "soon, pending a region-to-region "
+                                    "data source.",
+                                    style={
+                                        "margin": "auto",
+                                        "color": "#898781",
+                                        "textAlign": "center",
+                                        "padding": "2rem",
+                                    },
+                                ),
+                            ],
+                        ),
+                    ],
                 ),
 
                 html.Div(
-                    [
+                    id="year-controls",
+                    children=[
                         html.Div(
                             dcc.Slider(
                                 id="month-slider",
@@ -444,13 +586,7 @@ app.layout = html.Div(
                             disabled=True,
                         ),
                     ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "gap": "0.75rem",
-                        "padding": "0.75rem 1rem",
-                        "flex": "0 0 auto",
-                    },
+                    style=YEAR_CONTROLS_STYLE,
                 ),
             ],
             style={
@@ -530,6 +666,28 @@ def advance_month(n_intervals: int, month_index: int) -> int:
 
 
 @app.callback(
+    Output("year-controls", "style"),
+    Input("view-tabs", "value"),
+)
+def toggle_year_controls(active_tab: str) -> dict:
+    """Hide the year slider/play button while the trend tab is active.
+
+    Args:
+        active_tab: The currently selected dcc.Tabs value ("pyramid",
+            "trend", or "migration").
+
+    Returns:
+        YEAR_CONTROLS_STYLE with display switched to "none" at
+        "trend" (which plots every year at once, so the control has
+        nothing to do there), otherwise YEAR_CONTROLS_STYLE as-is.
+    """
+    if active_tab == "trend":
+        return {**YEAR_CONTROLS_STYLE, "display": "none"}
+
+    return YEAR_CONTROLS_STYLE
+
+
+@app.callback(
     Output("boundaries-layer", "data"),
     Input("level-selector", "value"),
 )
@@ -576,24 +734,13 @@ def update_boundary_highlights(
         return EMPTY_GEOJSON, EMPTY_GEOJSON
 
     radius_km = radius_slider_value_to_km(radius_slider_value)
+    areas, _, _ = _find_selected_areas(center, radius_km, level)
 
     if level == "county":
-        areas = find_counties_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
         id_key = "lan_code"
         source_geojson = COUNTIES_GEOJSON
         feature_id_key = "lan_code"
     else:
-        areas = find_municipalities_within_radius(
-            latitude=center["lat"],
-            longitude=center["lng"],
-            radius_km=radius_km,
-            geojson=MUNICIPALITIES_GEOJSON,
-        )
         id_key = "region_code"
         source_geojson = MUNICIPALITIES_GEOJSON
         feature_id_key = "id"
@@ -713,33 +860,10 @@ def update_population_pyramid(
         slider or play/pause moves through months.
     """
     month = AVAILABLE_MONTHS[month_index]
-    areas: list[dict] = []
-    region_codes: list[str] = []
-    name_key = "region"
-
-    if center:
-        radius_km = radius_slider_value_to_km(radius_slider_value)
-
-        if level == "county":
-            areas = find_counties_within_radius(
-                latitude=center["lat"],
-                longitude=center["lng"],
-                radius_km=radius_km,
-                geojson=MUNICIPALITIES_GEOJSON,
-            )
-            name_key = "county"
-            region_codes = [
-                code for area in areas for code in area["region_codes"]
-            ]
-        else:
-            areas = find_municipalities_within_radius(
-                latitude=center["lat"],
-                longitude=center["lng"],
-                radius_km=radius_km,
-                geojson=MUNICIPALITIES_GEOJSON,
-            )
-            region_codes = [area["region_code"] for area in areas]
-
+    radius_km = radius_slider_value_to_km(radius_slider_value)
+    areas, region_codes, name_key = _find_selected_areas(
+        center, radius_km, level
+    )
     title = _summarize_areas(areas, name_key)
 
     if region_codes:
@@ -750,6 +874,47 @@ def update_population_pyramid(
         )
 
     return create_population_pyramid(EMPTY_PYRAMID_DATA, title=title)
+
+
+@app.callback(
+    Output("population-trend", "figure"),
+    Input("map", "center"),
+    Input("radius-slider", "value"),
+    Input("level-selector", "value"),
+)
+def update_population_trend(
+    center: dict | None,
+    radius_slider_value: float,
+    level: str,
+) -> go.Figure:
+    """Build the population-over-time chart for the selected area.
+
+    Unlike the pyramid, this doesn't depend on the year slider - it
+    plots every available year at once, plus a projection beyond
+    them - so month-slider/play have no effect on this tab.
+
+    Args:
+        center: The map's current center, as {"lat": ..., "lng": ...},
+            or None before the map has reported one.
+        radius_slider_value: The radius-slider's raw (log-scale) value.
+        level: "municipality" or "county" (the level-selector's value).
+
+    Returns:
+        The population trend for the selected areas (empty if center
+        is None or nothing matches), titled with the nearest area
+        names (see _summarize_areas).
+    """
+    radius_km = radius_slider_value_to_km(radius_slider_value)
+    areas, region_codes, name_key = _find_selected_areas(
+        center, radius_km, level
+    )
+    title = _summarize_areas(areas, name_key)
+
+    if region_codes:
+        trend_data = get_population_trend(region_codes)
+        return create_population_trend(trend_data, title=title)
+
+    return create_population_trend(EMPTY_TREND_DATA, title=title)
 
 
 if __name__ == "__main__":

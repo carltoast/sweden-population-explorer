@@ -79,6 +79,31 @@ def get_population_pyramid(
     return result.sort_values(["age_code", "sex_code"]).reset_index(drop=True)
 
 
+def get_population_trend(region_codes: list[str]) -> pd.DataFrame:
+    """Total population per month, summed across region_codes.
+
+    Args:
+        region_codes: Municipality region codes to sum over.
+
+    Returns:
+        Columns month and population (summed across age groups and
+        sexes), ordered chronologically. Empty (but correctly shaped)
+        if region_codes is empty.
+    """
+    query = """
+        SELECT
+            month,
+            SUM(population) AS population
+        FROM population
+        WHERE region_code = ANY(%s)
+        GROUP BY month
+        ORDER BY month;
+    """
+
+    with get_connection() as connection:
+        return pd.read_sql_query(query, connection, params=(region_codes,))
+
+
 def get_max_pyramid_value(region_codes: list[str]) -> float:
     """Largest single age/sex population total across every month.
 

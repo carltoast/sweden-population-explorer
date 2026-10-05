@@ -2,8 +2,12 @@
 
 import pandas as pd
 import plotly.graph_objects as go
+import pytest
 
-from scb_data.visualisation import create_population_pyramid
+from scb_data.visualisation import (
+    create_population_pyramid,
+    create_population_trend,
+)
 
 
 def _population_pyramid_fixture():
@@ -145,3 +149,100 @@ def test_create_population_pyramid_handles_missing_sex():
     female_trace = next(trace for trace in fig.data if trace.name == "Female")
 
     assert list(female_trace.x) == [0]
+
+
+def _population_trend_fixture():
+    return pd.DataFrame(
+        {
+            "month": ["2020M12", "2022M12", "2024M12"],
+            "population": [1000, 1100, 1210],
+        }
+    )
+
+
+def test_create_population_trend_returns_figure():
+    fig = create_population_trend(_population_trend_fixture())
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_create_population_trend_historical_trace_matches_input():
+    fig = create_population_trend(_population_trend_fixture())
+
+    historical = next(
+        trace for trace in fig.data if trace.name == "Historical"
+    )
+
+    assert list(historical.x) == [2020, 2022, 2024]
+    assert list(historical.y) == [1000, 1100, 1210]
+
+
+def test_create_population_trend_projects_forward():
+    fig = create_population_trend(
+        _population_trend_fixture(), projection_years=5
+    )
+
+    projected = next(
+        trace for trace in fig.data if trace.name == "Projected"
+    )
+
+    # Starts at the last historical year and runs projection_years past
+    # it, growing (this fixture's population increases every period).
+    assert projected.x[0] == 2024
+    assert projected.x[-1] == 2029
+    assert projected.y[-1] > projected.y[0]
+
+
+def test_create_population_trend_projection_has_no_jump():
+    # The projection must start exactly at the last historical value -
+    # anchoring to the regression line's own (generally different)
+    # fitted value there instead caused a visible discontinuity.
+    fig = create_population_trend(_population_trend_fixture())
+
+    historical = next(
+        trace for trace in fig.data if trace.name == "Historical"
+    )
+    projected = next(
+        trace for trace in fig.data if trace.name == "Projected"
+    )
+
+    assert projected.x[0] == historical.x[-1]
+    assert projected.y[0] == pytest.approx(historical.y[-1])
+
+
+def test_create_population_trend_no_projection_with_one_point():
+    data = pd.DataFrame({"month": ["2024M12"], "population": [1000]})
+
+    fig = create_population_trend(data)
+
+    assert not any(trace.name == "Projected" for trace in fig.data)
+    assert len(fig.layout.annotations) == 0
+
+
+def test_create_population_trend_caption_states_rate_and_year_range():
+    fig = create_population_trend(_population_trend_fixture())
+
+    assert len(fig.layout.annotations) == 1
+
+    caption = fig.layout.annotations[0].text
+
+    assert caption.startswith("Projection:")
+    assert "%/year compound growth" in caption
+    assert "fit to 2020–2024 data" in caption
+
+
+def test_create_population_trend_handles_empty_data():
+    fig = create_population_trend(
+        pd.DataFrame(columns=["month", "population"])
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+
+
+def test_create_population_trend_sets_title_when_given():
+    fig = create_population_trend(
+        _population_trend_fixture(), title="Göteborg"
+    )
+
+    assert fig.layout.title.text == "Göteborg"

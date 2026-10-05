@@ -1,7 +1,8 @@
-"""Plotly figure: the population pyramid."""
+"""Plotly figures: the population pyramid and the population trend."""
 
 import math
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -14,6 +15,11 @@ import plotly.graph_objects as go
 # already satisfied by this chart's legend and hover labels.
 MALE_COLOR = "#1baf7a"
 FEMALE_COLOR = "#4a3aa7"
+
+# Categorical slot 1 (blue): unused elsewhere in this app (the pyramid uses
+# slots 3/7 above), so the trend chart reads as visually distinct from it
+# rather than implying some relationship between the two charts' colors.
+TREND_COLOR = "#2a78d6"
 
 
 def _nice_number(value: float) -> float:
@@ -169,6 +175,150 @@ def create_population_pyramid(
 
     if title:
         layout["title"] = {"text": title, "x": 0.5}
+
+    fig.update_layout(**layout)
+
+    return fig
+
+
+def create_population_trend(
+    data: pd.DataFrame,
+    projection_years: int = 10,
+    title: str | None = None,
+) -> go.Figure:
+    """Create a population-over-time line chart with a growth projection.
+
+    Args:
+        data: Rows with month ("YYYYMmm") and population (summed
+            across the selected areas, e.g. from
+            scb_data.queries.get_population_trend), ordered
+            chronologically. May be empty.
+        projection_years: How many years beyond the last available
+            year to project forward. Defaults to 10.
+        title: Optional title text (see create_population_pyramid's
+            title parameter for why it's built in here).
+
+    Returns:
+        A figure with a solid historical line plus, if there are at
+        least two historical points, a dashed projected continuation.
+        The growth rate is fit via linear regression of ln(population)
+        against year (so the projection compounds, like interest,
+        rather than extrapolating a constant absolute change - a
+        better fit for population growth, which tends to be
+        multiplicative, than a plain linear extrapolation would be),
+        but the curve itself is anchored to the last *actual* observed
+        value rather than the regression's own fitted value there -
+        anchoring to the regression line directly produced a visible
+        jump at the historical/projected boundary whenever the
+        least-squares fit (pulled toward every historical point, not
+        just the last one) didn't pass exactly through the latest
+        year's real figure, which was often enough to look broken.
+        Whenever there's a projection, a caption annotation below the
+        chart states the actual fitted annual growth rate and the
+        historical year range it was fit to, so the projection isn't
+        an unexplained black box.
+    """
+    fig = go.Figure()
+    caption = None
+
+    if not data.empty:
+        years = data["month"].str[:4].astype(int)
+        population = data["population"].astype(float)
+
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=population,
+                mode="lines+markers",
+                name="Historical",
+                line={"color": TREND_COLOR},
+                hovertemplate="%{x}<br>%{y:,.0f}<extra></extra>",
+            )
+        )
+
+        if len(years) >= 2 and (population > 0).all():
+            growth_rate, _ = np.polyfit(years, np.log(population), 1)
+            last_year = years.iloc[-1]
+            last_population = population.iloc[-1]
+            future_years = np.arange(
+                last_year, last_year + projection_years + 1
+            )
+            projected = last_population * np.exp(
+                growth_rate * (future_years - last_year)
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=future_years,
+                    y=projected,
+                    mode="lines",
+                    name="Projected",
+                    line={"color": TREND_COLOR, "dash": "dash"},
+                    hovertemplate=(
+                        "%{x}<br>%{y:,.0f} (projected)<extra></extra>"
+                    ),
+                )
+            )
+
+            # The actual fitted rate, not just the method's name, so the
+            # projection isn't a black box - a reader can judge for
+            # themselves whether +1.3%/year sounds like a reasonable
+            # continuation of the trend they're looking at.
+            annual_growth_pct = (math.exp(growth_rate) - 1) * 100
+            caption = (
+                f"Projection: {annual_growth_pct:+.1f}%/year compound "
+                f"growth, fit to {years.iloc[0]}–{last_year} data"
+            )
+
+    layout: dict = {
+        "xaxis": {
+            "title": "Year",
+            "gridcolor": "#e1e0d9",
+            "zerolinecolor": "#c3c2b7",
+        },
+        "yaxis": {
+            "title": "Population",
+            "tickformat": ",",
+            "gridcolor": "#e1e0d9",
+            "zerolinecolor": "#c3c2b7",
+        },
+        "plot_bgcolor": "white",
+        "paper_bgcolor": "white",
+        "legend": {
+            "x": 0.02,
+            "y": 0.98,
+            "xanchor": "left",
+            "yanchor": "top",
+            "bgcolor": "rgba(255, 255, 255, 0.7)",
+        },
+        # Extra bottom margin makes room for the caption annotation
+        # below the x-axis title, when there is one (harmless unused
+        # space otherwise). The annotation's "paper"-relative y is a
+        # *fraction of the plot area's height*, not a pixel offset, so
+        # it was initially placed far enough below the axis to fall
+        # outside a too-small margin and get silently clipped - a
+        # generous fixed margin plus a shallower fraction keeps it
+        # inside the figure regardless of the plot's actual height.
+        "margin": {"t": 50, "b": 120},
+    }
+
+    if title:
+        layout["title"] = {"text": title, "x": 0.5}
+
+    if caption:
+        layout["annotations"] = [
+            {
+                "text": caption,
+                "showarrow": False,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": -0.13,
+                "xanchor": "center",
+                "yanchor": "top",
+                "font": {"size": 12, "color": "#898781"},
+            }
+        ]
 
     fig.update_layout(**layout)
 

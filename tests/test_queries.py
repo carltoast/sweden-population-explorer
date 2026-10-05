@@ -7,6 +7,7 @@ from scb_data.queries import (
     get_available_months,
     get_max_pyramid_value,
     get_population_pyramid,
+    get_population_trend,
 )
 
 
@@ -104,6 +105,50 @@ def test_get_population_pyramid_orders_by_age():
     )
 
     assert list(result["age_code"]) == ["-9", "20-29", "100+"]
+
+
+def test_get_population_trend_sums_across_regions_by_month():
+    df = pd.DataFrame(
+        {
+            "region_code": ["1480", "1480", "1481", "1481", "0180"],
+            "region": [
+                "Göteborg", "Göteborg", "Mölndal", "Mölndal", "Stockholm",
+            ],
+            "age_code": ["-9", "-9", "-9", "-9", "-9"],
+            "age_group": [
+                "0–9 years",
+                "0–9 years",
+                "0–9 years",
+                "0–9 years",
+                "0–9 years",
+            ],
+            "sex_code": ["1", "1", "1", "1", "1"],
+            "sex": ["men", "men", "men", "men", "men"],
+            "month": [
+                "2020M12",
+                "2024M12",
+                "2020M12",
+                "2024M12",
+                "2024M12",
+            ],
+            "population": [100, 110, 20, 25, 99999],
+        }
+    )
+
+    insert_population_data(df)
+
+    result = get_population_trend(region_codes=["1480", "1481"])
+
+    assert list(result.columns) == ["month", "population"]
+    assert list(result["month"]) == ["2020M12", "2024M12"]
+    assert list(result["population"]) == [120, 135]
+
+
+def test_get_population_trend_empty_for_no_matching_regions():
+    result = get_population_trend(region_codes=["9999"])
+
+    assert list(result.columns) == ["month", "population"]
+    assert len(result) == 0
 
 
 def test_get_max_pyramid_value_finds_largest_age_sex_total_across_months():

@@ -2,10 +2,11 @@
 
 import pandas as pd
 
-from scb_data.database import insert_population_data
+from scb_data.database import insert_migration_data, insert_population_data
 from scb_data.queries import (
     get_available_months,
     get_max_pyramid_value,
+    get_migration_flows,
     get_population_pyramid,
     get_population_trend,
 )
@@ -174,3 +175,58 @@ def test_get_max_pyramid_value_finds_largest_age_sex_total_across_months():
 
 def test_get_max_pyramid_value_returns_zero_for_no_matching_regions():
     assert get_max_pyramid_value(["9999"]) == 0.0
+
+
+def _migration_fixture():
+    return pd.DataFrame(
+        {
+            "from_lan_code": ["01", "03", "01", "05", "03", "04"],
+            "to_lan_code": ["03", "01", "04", "01", "04", "03"],
+            "sex_code": ["1", "1", "1", "1", "1", "1"],
+            "year": ["2024"] * 6,
+            "migrations": [100, 150, 50, 30, 999, 20],
+        }
+    )
+
+
+def test_get_migration_flows_single_county():
+    insert_migration_data(_migration_fixture())
+
+    result = get_migration_flows(lan_codes=["01"], year="2024")
+
+    assert list(result.columns) == ["lan_code", "inflow", "outflow"]
+
+    by_county = result.set_index("lan_code")
+    # 03 <-> 04 (999) touches neither endpoint of the "01" selection and
+    # is correctly excluded entirely.
+    assert by_county.loc["03", "inflow"] == 150
+    assert by_county.loc["03", "outflow"] == 100
+    assert by_county.loc["04", "inflow"] == 0
+    assert by_county.loc["04", "outflow"] == 50
+    assert by_county.loc["05", "inflow"] == 30
+    assert by_county.loc["05", "outflow"] == 0
+    assert "01" not in by_county.index
+
+
+def test_get_migration_flows_excludes_internal_multi_county_flows():
+    insert_migration_data(_migration_fixture())
+
+    result = get_migration_flows(lan_codes=["01", "03"], year="2024")
+
+    by_county = result.set_index("lan_code")
+    # 01<->03 (100, 150) is internal to the selection and excluded;
+    # 03->04 (999) and 01->04 (50) both count as outflow from the
+    # selected area since 04 isn't selected.
+    assert by_county.loc["04", "outflow"] == 999 + 50
+    assert by_county.loc["04", "inflow"] == 20
+    assert by_county.loc["05", "inflow"] == 30
+    assert by_county.loc["05", "outflow"] == 0
+    assert "01" not in by_county.index
+    assert "03" not in by_county.index
+
+
+def test_get_migration_flows_empty_for_no_counties():
+    result = get_migration_flows(lan_codes=[], year="2024")
+
+    assert list(result.columns) == ["lan_code", "inflow", "outflow"]
+    assert len(result) == 0

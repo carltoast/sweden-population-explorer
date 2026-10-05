@@ -98,7 +98,7 @@ Municipality geometry is stored separately as GeoJSON and is used to connect the
 
 ## Interactive application
 
-`app.py` is a Dash application for exploring the population data geographically: pan a borders-only map of Sweden to pick a location and radius (or switch to whole counties), then explore that area across two tabs - a population pyramid animated across every year of available data, and a population trend chart with a growth-rate projection a few years out. A third "Migration" tab (who moved where, between counties) is planned; the underlying data is retrieved and stored, with the tab's own visualization still in progress.
+`app.py` is a Dash application for exploring the population data geographically: pan a borders-only map of Sweden to pick a location and radius (or switch to whole counties), then explore that area across three tabs - a population pyramid animated across every year of available data, a population trend chart with a growth-rate projection a few years out, and a Migration tab showing who moved to or from the selected area as a Sankey diagram (switching to this tab automatically selects county level, since migration data is only available at that granularity).
 
 Run it locally with:
 
@@ -197,11 +197,11 @@ The project currently provides:
 * A population pyramid (male/female by age group) for the selected area
 * A year slider with play/pause, animating through 2000-2024
 * A population trend tab with a compound-growth-rate projection a few years beyond the available data
-* County-to-county migration data retrieved from SCB and stored (visualization in progress)
+* A Migration tab showing county-to-county migration flows as a Sankey diagram, with a "moved to"/"moved from" toggle
 * Unit and database integration tests
 * Docker-based test execution
 * GitHub Actions CI
 
 ## Roadmap
 
-The Migration tab's visualization (who moved where, between counties, as a Sankey diagram) is still in progress. The underlying data - a genuine county-to-county migration matrix from SCB - is already retrieved and stored.
+No further items are currently planned.

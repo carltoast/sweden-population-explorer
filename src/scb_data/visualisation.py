@@ -1,10 +1,12 @@
-"""Plotly figures: the population pyramid and the population trend."""
+"""Plotly figures: the population pyramid, trend, and migration Sankey."""
 
 import math
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+
+from scb_data.geography import COUNTY_NAMES
 
 # Aqua/violet (categorical slots 3 and 7): a gender-neutral pair, re-checked
 # against the dataviz skill's validator for this specific (non-adjacent)
@@ -319,6 +321,111 @@ def create_population_trend(
                 "font": {"size": 12, "color": "#898781"},
             }
         ]
+
+    fig.update_layout(**layout)
+
+    return fig
+
+
+# This is an "emphasis" diagram, not a categorical one: the selected area is
+# the one subject the reader cares about, every other county is context, not
+# a set of identities that each need their own distinct hue (a rainbow
+# Sankey would wrongly imply the individual county colors mean something -
+# the real magnitude encoding is link width/the hover value, not color). One
+# accent (amber, matching the map's selected-area highlight - see app.py's
+# SELECTED_AREA_STYLE) plus one muted neutral for every "other" node and
+# link keeps the two roles (subject vs. context) clear without a false
+# categorical distinction between the other counties.
+SANKEY_SELECTED_COLOR = "#f2a900"
+SANKEY_OTHER_COLOR = "#c3c2b7"
+SANKEY_LINK_COLOR = "rgba(242, 169, 0, 0.35)"
+
+
+def create_migration_sankey(
+    data: pd.DataFrame,
+    direction: str,
+    area_label: str,
+    title: str | None = None,
+) -> go.Figure:
+    """Create a Sankey diagram of migration flows in/out of a selection.
+
+    Args:
+        data: Rows with lan_code, inflow, and outflow (e.g. from
+            scb_data.queries.get_migration_flows), one row per other
+            county with a nonzero flow in either direction. May be
+            empty.
+        direction: "to" shows migrations *into* the selected area (an
+            arrow per other county, pointing at the selected area,
+            sized by that county's outflow to it); "from" shows
+            migrations *out of* the selected area (arrows pointing
+            away from it, sized by its outflow to each other county).
+        area_label: Display name for the aggregate selected-area node
+            (e.g. the pyramid tab's own area summary).
+        title: Optional title text (see create_population_pyramid's
+            title parameter for why it's built in here).
+
+    Returns:
+        A Sankey figure with the selected area as one node (amber)
+        and one node per other county with a nonzero flow in the
+        requested direction (muted gray), sorted so the largest flows
+        are easiest to pick out. Link width is proportional to the
+        number of migrations. Just the "Selected area" node, with no
+        links, if data is empty or every flow in the requested
+        direction is zero.
+    """
+    value_column = "inflow" if direction == "to" else "outflow"
+    flows = data[data[value_column] > 0].sort_values(
+        value_column, ascending=False
+    )
+
+    county_labels = [
+        COUNTY_NAMES.get(code, code) for code in flows["lan_code"]
+    ]
+    node_labels = [area_label] + county_labels
+    node_colors = [SANKEY_SELECTED_COLOR] + [SANKEY_OTHER_COLOR] * len(
+        county_labels
+    )
+    other_node_indices = list(range(1, len(node_labels)))
+
+    if direction == "to":
+        # other county -> selected area
+        sources = other_node_indices
+        targets = [0] * len(county_labels)
+    else:
+        # selected area -> other county
+        sources = [0] * len(county_labels)
+        targets = other_node_indices
+
+    fig = go.Figure(
+        go.Sankey(
+            node={
+                "label": node_labels,
+                "color": node_colors,
+                "pad": 16,
+                "thickness": 18,
+                "line": {"width": 0},
+            },
+            link={
+                "source": sources,
+                "target": targets,
+                "value": list(flows[value_column]),
+                "color": SANKEY_LINK_COLOR,
+                "hovertemplate": (
+                    "%{source.label} → %{target.label}"
+                    "<br>%{value:,.0f} people<extra></extra>"
+                ),
+            },
+        )
+    )
+
+    layout: dict = {
+        "font": {"size": 13, "color": "#52514e"},
+        "paper_bgcolor": "white",
+        "margin": {"t": 50, "l": 10, "r": 10, "b": 10},
+    }
+
+    if title:
+        layout["title"] = {"text": title, "x": 0.5}
 
     fig.update_layout(**layout)
 

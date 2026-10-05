@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import pytest
 
 from scb_data.visualisation import (
+    create_migration_sankey,
     create_population_pyramid,
     create_population_trend,
 )
@@ -246,3 +247,95 @@ def test_create_population_trend_sets_title_when_given():
     )
 
     assert fig.layout.title.text == "Göteborg"
+
+
+def _migration_flows_fixture():
+    return pd.DataFrame(
+        {
+            "lan_code": ["03", "04", "05"],
+            "inflow": [150, 0, 30],
+            "outflow": [100, 50, 0],
+        }
+    )
+
+
+def test_create_migration_sankey_returns_figure():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(), direction="to", area_label="Selected"
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 1
+    assert isinstance(fig.data[0], go.Sankey)
+
+
+def test_create_migration_sankey_to_direction_points_at_selected_area():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(), direction="to", area_label="Selected"
+    )
+
+    sankey = fig.data[0]
+
+    # Only 03 (150) and 05 (30) have nonzero inflow; 04 (0) is excluded.
+    # "Selected area" is always node 0; other counties fill in after it.
+    assert list(sankey.node.label[1:]) == [
+        "Uppsala län", "Östergötlands län",
+    ]
+    assert all(target == 0 for target in sankey.link.target)
+    assert list(sankey.link.value) == [150, 30]
+
+
+def test_create_migration_sankey_from_direction_points_away():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(), direction="from", area_label="Selected"
+    )
+
+    sankey = fig.data[0]
+
+    # Only 03 (100) and 04 (50) have nonzero outflow; 05 (0) is excluded.
+    assert all(source == 0 for source in sankey.link.source)
+    assert list(sankey.link.value) == [100, 50]
+
+
+def test_create_migration_sankey_sorts_largest_flow_first():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(), direction="to", area_label="Selected"
+    )
+
+    values = list(fig.data[0].link.value)
+
+    assert values == sorted(values, reverse=True)
+
+
+def test_create_migration_sankey_selected_area_is_first_node():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(),
+        direction="to",
+        area_label="Västra Götaland",
+    )
+
+    assert fig.data[0].node.label[0] == "Västra Götaland"
+
+
+def test_create_migration_sankey_handles_empty_data():
+    fig = create_migration_sankey(
+        pd.DataFrame(columns=["lan_code", "inflow", "outflow"]),
+        direction="to",
+        area_label="Selected",
+    )
+
+    sankey = fig.data[0]
+
+    assert list(sankey.node.label) == ["Selected"]
+    assert len(sankey.link.value) == 0
+
+
+def test_create_migration_sankey_sets_title_when_given():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(),
+        direction="to",
+        area_label="Selected",
+        title="Selected — moved to (2024)",
+    )
+
+    assert fig.layout.title.text == "Selected — moved to (2024)"

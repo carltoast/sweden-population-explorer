@@ -1,4 +1,4 @@
-"""Read-side SQL queries for the population table."""
+"""Read-side SQL queries for the population and migration tables."""
 
 import pandas as pd
 
@@ -133,3 +133,74 @@ def get_max_pyramid_value(region_codes: list[str]) -> float:
         with connection.cursor() as cursor:
             cursor.execute(query, (region_codes,))
             return float(cursor.fetchone()[0])
+
+
+def get_migration_flows(lan_codes: list[str], year: str) -> pd.DataFrame:
+    """Migration flows between the selected counties and every other one.
+
+    The selected counties (lan_codes) are treated as a single
+    aggregate area - this is what lets the Migration tab work
+    regardless of how many counties are currently selected, per the
+    original feature request. Flows between two selected counties
+    (both endpoints in lan_codes) are excluded: they're moves within
+    the selected area, not in or out of it, so they're not part of
+    this aggregate's "exchange with the outside world".
+
+    Args:
+        lan_codes: Selected county codes, treated as one area.
+        year: Calendar year to query (e.g. "2024").
+
+    Returns:
+        One row per other county (any county not in lan_codes) that
+        has a nonzero flow in either direction, with columns
+        lan_code, inflow (migrations from that county into the
+        selected area) and outflow (migrations from the selected area
+        into that county), summed across sex. Empty (but correctly
+        shaped) if lan_codes is empty.
+    """
+    if not lan_codes:
+        return pd.DataFrame(columns=["lan_code", "inflow", "outflow"])
+
+    query = """
+        SELECT
+            lan_code,
+            SUM(inflow) AS inflow,
+            SUM(outflow) AS outflow
+        FROM (
+            -- Inflow: the OTHER county is the origin (from_lan_code) -
+            -- migrations from somewhere outside the selection INTO it.
+            SELECT
+                from_lan_code AS lan_code,
+                migrations AS inflow,
+                0 AS outflow
+            FROM migration
+            WHERE year = %s
+              AND from_lan_code != ALL(%s)
+              AND to_lan_code = ANY(%s)
+
+            UNION ALL
+
+            -- Outflow: the OTHER county is the destination (to_lan_code)
+            -- - migrations from the selection OUT to somewhere else.
+            SELECT
+                to_lan_code AS lan_code,
+                0 AS inflow,
+                migrations AS outflow
+            FROM migration
+            WHERE year = %s
+              AND from_lan_code = ANY(%s)
+              AND to_lan_code != ALL(%s)
+        ) AS flows
+        GROUP BY lan_code
+        ORDER BY (SUM(inflow) + SUM(outflow)) DESC;
+    """
+
+    with get_connection() as connection:
+        return pd.read_sql_query(
+            query,
+            connection,
+            params=(
+                year, lan_codes, lan_codes,
+                year, lan_codes, lan_codes,
+            ),
+        )

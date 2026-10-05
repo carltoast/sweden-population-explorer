@@ -5,8 +5,10 @@ fixed screen-center marker and radius ring, sees which municipalities
 or counties fall within that radius (highlighted on the map), and
 explores their population across three tabs: a pyramid at a chosen
 year (with play/pause to animate through the available years), a
-population-over-time trend with a growth projection, and (pending a
-region-to-region data source) migration statistics.
+population-over-time trend with a growth projection, and county-to-
+county migration flows as a Sankey diagram (switching to the
+Migration tab automatically selects county level, since migration
+data only exists at that granularity).
 
 The marker and radius ring are plain CSS overlays fixed to the screen
 center, not geographic Leaflet layers - a Leaflet layer's position
@@ -36,10 +38,12 @@ from scb_data.geography import (
 from scb_data.queries import (
     get_available_months,
     get_max_pyramid_value,
+    get_migration_flows,
     get_population_pyramid,
     get_population_trend,
 )
 from scb_data.visualisation import (
+    create_migration_sankey,
     create_population_pyramid,
     create_population_trend,
 )
@@ -532,15 +536,32 @@ app.layout = html.Div(
                             value="migration",
                             children=[
                                 html.Div(
-                                    "Migration statistics are coming "
-                                    "soon, pending a region-to-region "
-                                    "data source.",
+                                    dcc.RadioItems(
+                                        id="migration-direction",
+                                        options=[
+                                            {
+                                                "label": "Moved to",
+                                                "value": "to",
+                                            },
+                                            {
+                                                "label": "Moved from",
+                                                "value": "from",
+                                            },
+                                        ],
+                                        value="to",
+                                        inline=True,
+                                    ),
                                     style={
-                                        "margin": "auto",
-                                        "color": "#898781",
-                                        "textAlign": "center",
-                                        "padding": "2rem",
+                                        "display": "flex",
+                                        "justifyContent": "center",
+                                        "padding": "0.5rem 0",
+                                        "flex": "0 0 auto",
                                     },
+                                ),
+                                dcc.Graph(
+                                    id="migration-sankey",
+                                    style={"flex": "1 1 auto"},
+                                    config={"responsive": True},
                                 ),
                             ],
                         ),
@@ -685,6 +706,38 @@ def toggle_year_controls(active_tab: str) -> dict:
         return {**YEAR_CONTROLS_STYLE, "display": "none"}
 
     return YEAR_CONTROLS_STYLE
+
+
+@app.callback(
+    Output("level-selector", "value"),
+    Input("view-tabs", "value"),
+    prevent_initial_call=True,
+)
+def select_county_level_for_migration(active_tab: str) -> str:
+    """Switch to county level automatically when entering the Migration tab.
+
+    Migration data only exists at county resolution (see
+    queries.get_migration_flows), so the map/level-selector are
+    nudged to match it - the migration callback itself always
+    resolves the selection to counties regardless (see
+    update_migration_sankey), so this is a UX nicety (keeping the map
+    visually consistent with what's being queried) rather than a
+    correctness requirement.
+
+    Args:
+        active_tab: The currently selected dcc.Tabs value ("pyramid",
+            "trend", or "migration").
+
+    Returns:
+        "county" when switching to the Migration tab. Raises
+        PreventUpdate otherwise, leaving the level-selector exactly
+        as the user left it - switching away from Migration doesn't
+        force it back to anything.
+    """
+    if active_tab != "migration":
+        raise PreventUpdate
+
+    return "county"
 
 
 @app.callback(
@@ -915,6 +968,60 @@ def update_population_trend(
         return create_population_trend(trend_data, title=title)
 
     return create_population_trend(EMPTY_TREND_DATA, title=title)
+
+
+@app.callback(
+    Output("migration-sankey", "figure"),
+    Input("map", "center"),
+    Input("radius-slider", "value"),
+    Input("month-slider", "value"),
+    Input("migration-direction", "value"),
+)
+def update_migration_sankey(
+    center: dict | None,
+    radius_slider_value: float,
+    month_index: int,
+    direction: str,
+) -> go.Figure:
+    """Build the migration Sankey diagram for the selected area and year.
+
+    Always resolves the selection to counties regardless of the
+    level-selector's current value - migration data only exists at
+    county resolution (see queries.get_migration_flows), and a user
+    can still flip the level-selector to "municipality" by hand after
+    entering this tab (select_county_level_for_migration only sets it
+    automatically on arrival, it doesn't lock it).
+
+    Args:
+        center: The map's current center, as {"lat": ..., "lng": ...},
+            or None before the map has reported one.
+        radius_slider_value: The radius-slider's raw (log-scale) value.
+        month_index: Index into AVAILABLE_MONTHS for the selected
+            year - migration data is annual, so only the year portion
+            (AVAILABLE_MONTHS[month_index][:4]) is used.
+        direction: "to" or "from" (the migration-direction radio's
+            value).
+
+    Returns:
+        A Sankey diagram of migration flows between the selected
+        counties (as one aggregate area) and every other county
+        (empty but for the area's own node if center is None or
+        nothing matches), titled with the nearest area names (see
+        _summarize_areas) and the selected year.
+    """
+    year = AVAILABLE_MONTHS[month_index][:4]
+    radius_km = radius_slider_value_to_km(radius_slider_value)
+    areas, _, _ = _find_selected_areas(center, radius_km, "county")
+    lan_codes = [area["lan_code"] for area in areas]
+    area_label = _summarize_areas(areas, "county")
+
+    flows = get_migration_flows(lan_codes, year)
+    direction_label = "moved to" if direction == "to" else "moved from"
+    title = f"{area_label} — {direction_label} ({year})"
+
+    return create_migration_sankey(
+        flows, direction=direction, area_label=area_label, title=title
+    )
 
 
 if __name__ == "__main__":

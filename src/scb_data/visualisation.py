@@ -269,7 +269,8 @@ def create_population_trend(
             annual_growth_pct = (math.exp(growth_rate) - 1) * 100
             caption = (
                 f"Projection: {annual_growth_pct:+.1f}%/year compound "
-                f"growth, fit to {years.iloc[0]}–{last_year} data"
+                f"growth, fit to {years.iloc[0]}–{last_year} data<br>"
+                "Simple model - not a rigorous forecast."
             )
 
     layout: dict = {
@@ -301,7 +302,10 @@ def create_population_trend(
         # outside a too-small margin and get silently clipped - a
         # generous fixed margin plus a shallower fraction keeps it
         # inside the figure regardless of the plot's actual height.
-        "margin": {"t": 50, "b": 120},
+        # (The caption grew from one line to two - "simple model"
+        # disclaimer added below the fitted-rate line - so this has
+        # extra headroom built in versus the single-line case.)
+        "margin": {"t": 50, "b": 135},
     }
 
     if title:
@@ -346,6 +350,7 @@ def create_migration_sankey(
     direction: str,
     area_label: str,
     title: str | None = None,
+    max_other_counties: int = 10,
 ) -> go.Figure:
     """Create a Sankey diagram of migration flows in/out of a selection.
 
@@ -363,25 +368,48 @@ def create_migration_sankey(
             (e.g. the pyramid tab's own area summary).
         title: Optional title text (see create_population_pyramid's
             title parameter for why it's built in here).
+        max_other_counties: At most this many individual county nodes
+            are shown (the largest flows); every county beyond that
+            is folded into one "Other counties" node instead, to keep
+            the diagram readable rather than cluttered with ~20 thin
+            flows. Defaults to 10.
 
     Returns:
-        A Sankey figure with the selected area as one node (amber)
-        and one node per other county with a nonzero flow in the
-        requested direction (muted gray), sorted so the largest flows
-        are easiest to pick out. Link width is proportional to the
-        number of migrations. Just the "Selected area" node, with no
-        links, if data is empty or every flow in the requested
-        direction is zero.
+        A Sankey figure with the selected area as one node (amber,
+        labeled with its total) and one node per other county with a
+        nonzero flow in the requested direction (muted gray, labeled
+        with its own value), sorted so the largest flows are easiest
+        to pick out, any beyond max_other_counties folded into one
+        "Other counties" node. Node positions are fixed (not
+        user-draggable) and hovering shows nothing - every value
+        that matters is already a permanent label, not something the
+        reader has to find by hovering. Just the "Selected area" node,
+        with no links, if data is empty or every flow in the
+        requested direction is zero.
     """
     value_column = "inflow" if direction == "to" else "outflow"
     flows = data[data[value_column] > 0].sort_values(
         value_column, ascending=False
     )
 
+    shown = flows.iloc[:max_other_counties]
+    folded = flows.iloc[max_other_counties:]
+
     county_labels = [
-        COUNTY_NAMES.get(code, code) for code in flows["lan_code"]
+        f"{COUNTY_NAMES.get(code, code)} ({value:,.0f})"
+        for code, value in zip(shown["lan_code"], shown[value_column])
     ]
-    node_labels = [area_label] + county_labels
+    values = list(shown[value_column])
+
+    if not folded.empty:
+        folded_total = folded[value_column].sum()
+        county_labels.append(
+            f"Other counties ({len(folded)}) ({folded_total:,.0f})"
+        )
+        values.append(folded_total)
+
+    area_total = flows[value_column].sum()
+    node_labels = [f"{area_label} ({area_total:,.0f})"] + county_labels
     node_colors = [SANKEY_SELECTED_COLOR] + [SANKEY_OTHER_COLOR] * len(
         county_labels
     )
@@ -398,22 +426,24 @@ def create_migration_sankey(
 
     fig = go.Figure(
         go.Sankey(
+            # "fixed": the reader can't drag nodes out of their
+            # computed layout - there's nothing to accidentally mess
+            # up, and the positions stay comparable across redraws.
+            arrangement="fixed",
             node={
                 "label": node_labels,
                 "color": node_colors,
                 "pad": 16,
                 "thickness": 18,
                 "line": {"width": 0},
+                "hoverinfo": "skip",
             },
             link={
                 "source": sources,
                 "target": targets,
-                "value": list(flows[value_column]),
+                "value": values,
                 "color": SANKEY_LINK_COLOR,
-                "hovertemplate": (
-                    "%{source.label} → %{target.label}"
-                    "<br>%{value:,.0f} people<extra></extra>"
-                ),
+                "hoverinfo": "skip",
             },
         )
     )

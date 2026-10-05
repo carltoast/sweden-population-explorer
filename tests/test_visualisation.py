@@ -230,6 +230,7 @@ def test_create_population_trend_caption_states_rate_and_year_range():
     assert caption.startswith("Projection:")
     assert "%/year compound growth" in caption
     assert "fit to 2020–2024 data" in caption
+    assert "Simple model" in caption
 
 
 def test_create_population_trend_handles_empty_data():
@@ -277,12 +278,48 @@ def test_create_migration_sankey_to_direction_points_at_selected_area():
     sankey = fig.data[0]
 
     # Only 03 (150) and 05 (30) have nonzero inflow; 04 (0) is excluded.
-    # "Selected area" is always node 0; other counties fill in after it.
+    # "Selected area" is always node 0; other counties fill in after it,
+    # each labeled with its own value.
     assert list(sankey.node.label[1:]) == [
-        "Uppsala län", "Östergötlands län",
+        "Uppsala län (150)", "Östergötlands län (30)",
     ]
     assert all(target == 0 for target in sankey.link.target)
     assert list(sankey.link.value) == [150, 30]
+
+
+def test_create_migration_sankey_disables_dragging_and_hover():
+    fig = create_migration_sankey(
+        _migration_flows_fixture(), direction="to", area_label="Selected"
+    )
+
+    sankey = fig.data[0]
+
+    assert sankey.arrangement == "fixed"
+    assert sankey.node.hoverinfo == "skip"
+    assert sankey.link.hoverinfo == "skip"
+
+
+def test_create_migration_sankey_folds_extra_counties_into_other():
+    data = pd.DataFrame(
+        {
+            "lan_code": [f"{i:02d}" for i in range(1, 15)],
+            "inflow": list(range(140, 0, -10)),
+            "outflow": [0] * 14,
+        }
+    )
+
+    fig = create_migration_sankey(
+        data, direction="to", area_label="Selected", max_other_counties=10
+    )
+
+    sankey = fig.data[0]
+
+    # 1 selected-area node + 10 individual counties + 1 "Other" node.
+    assert len(sankey.node.label) == 12
+    assert sankey.node.label[-1].startswith("Other counties (4)")
+
+    # The folded total is the sum of the 4 smallest flows (40+30+20+10).
+    assert list(sankey.link.value)[-1] == 100
 
 
 def test_create_migration_sankey_from_direction_points_away():
@@ -314,7 +351,8 @@ def test_create_migration_sankey_selected_area_is_first_node():
         area_label="Västra Götaland",
     )
 
-    assert fig.data[0].node.label[0] == "Västra Götaland"
+    # Labeled with the total of its own flows (150 + 30 inflow).
+    assert fig.data[0].node.label[0] == "Västra Götaland (180)"
 
 
 def test_create_migration_sankey_handles_empty_data():
@@ -326,7 +364,7 @@ def test_create_migration_sankey_handles_empty_data():
 
     sankey = fig.data[0]
 
-    assert list(sankey.node.label) == ["Selected"]
+    assert list(sankey.node.label) == ["Selected (0)"]
     assert len(sankey.link.value) == 0
 
 

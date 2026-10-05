@@ -1006,8 +1006,11 @@ def update_migration_sankey(
         A Sankey diagram of migration flows between the selected
         counties (as one aggregate area) and every other county
         (empty but for the area's own node if center is None or
-        nothing matches), titled with the nearest area names (see
-        _summarize_areas) and the selected year.
+        nothing matches), titled with just the nearest area names
+        (see _summarize_areas) - the direction is already shown by
+        the "Moved to"/"Moved from" toggle right above the chart, and
+        the year by the year slider below it, so repeating either in
+        the title would just be redundant.
     """
     year = AVAILABLE_MONTHS[month_index][:4]
     radius_km = radius_slider_value_to_km(radius_slider_value)
@@ -1016,11 +1019,9 @@ def update_migration_sankey(
     area_label = _summarize_areas(areas, "county")
 
     flows = get_migration_flows(lan_codes, year)
-    direction_label = "moved to" if direction == "to" else "moved from"
-    title = f"{area_label} — {direction_label} ({year})"
 
     return create_migration_sankey(
-        flows, direction=direction, area_label=area_label, title=title
+        flows, direction=direction, area_label=area_label, title=area_label
     )
 
 

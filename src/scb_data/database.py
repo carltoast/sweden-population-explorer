@@ -110,3 +110,78 @@ def clear_population_table() -> None:
             cursor.execute("TRUNCATE TABLE population;")
 
         connection.commit()
+
+
+def create_migration_table() -> None:
+    """Create the migration table if it doesn't already exist.
+
+    The primary key is (from_lan_code, to_lan_code, sex_code, year),
+    one row per origin-county/destination-county/sex/year
+    combination.
+    """
+    query = """
+        CREATE TABLE IF NOT EXISTS migration (
+            from_lan_code VARCHAR(2) NOT NULL,
+            to_lan_code VARCHAR(2) NOT NULL,
+            sex_code TEXT NOT NULL,
+            year CHAR(4) NOT NULL,
+            migrations INTEGER NOT NULL,
+            PRIMARY KEY (from_lan_code, to_lan_code, sex_code, year)
+        );
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+
+        connection.commit()
+
+
+def insert_migration_data(df: pd.DataFrame) -> None:
+    """Upsert migration rows into the migration table.
+
+    Args:
+        df: Rows with from_lan_code, to_lan_code, sex_code, year, and
+            migrations columns (as produced by
+            scb_data.migration.clean_migration_data). On a
+            primary-key conflict (same from_lan_code/to_lan_code/
+            sex_code/year), the existing row's migrations count is
+            updated in place rather than duplicated.
+    """
+    query = """
+        INSERT INTO migration (
+            from_lan_code,
+            to_lan_code,
+            sex_code,
+            year,
+            migrations
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (from_lan_code, to_lan_code, sex_code, year)
+        DO UPDATE SET migrations = EXCLUDED.migrations;
+    """
+
+    rows = df[
+        [
+            "from_lan_code",
+            "to_lan_code",
+            "sex_code",
+            "year",
+            "migrations",
+        ]
+    ].itertuples(index=False, name=None)
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.executemany(query, rows)
+
+        connection.commit()
+
+
+def clear_migration_table() -> None:
+    """Delete all rows from the migration table."""
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("TRUNCATE TABLE migration;")
+
+        connection.commit()

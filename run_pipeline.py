@@ -1,5 +1,6 @@
-"""Fetch population data for every municipality, 2000-2024, into Postgres."""
+"""Fetch population/migration data, 2000-2024, into Postgres."""
 
+from scb_data.migration import load_migration_data
 from scb_data.population import load_population_data
 from scb_data.scb_api import get_regions
 
@@ -57,4 +58,13 @@ data = load_population_data(
     months=months,
 )
 
-print(f"Loaded {len(data)} rows.")
+print(f"Loaded {len(data)} population rows.")
+
+# Migration is annual, not monthly - reuse the same years as `months`
+# above rather than a separately-maintained list, so the two can't
+# drift apart.
+years = sorted({month[:4] for month in months})
+
+migration_data = load_migration_data(years=years)
+
+print(f"Loaded {len(migration_data)} migration rows.")

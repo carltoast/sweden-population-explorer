@@ -1,6 +1,6 @@
 # Sweden Population Explorer
 
-This is a personal project to gain hands-on experience with the full lifecycle of a data project: pulling real-world data from a public API, cleaning and storing it in a relational database, and building an interactive application to explore it geographically. It's achieved by working with Statistics Sweden's (SCB) open population statistics (covering every Swedish municipality, by age and sex, from 2000 onward) through a Python/PostgreSQL pipeline and a Dash/Leaflet web application built on top of it.
+This is a personal project to gain hands-on experience with the full lifecycle of a data project: pulling real-world data from a public API, cleaning and storing it in a relational database, and building an interactive application to explore it geographically. It's achieved by working with two of Statistics Sweden's (SCB) open datasets - population (covering every Swedish municipality, by age and sex, from 2000 onward) and county-to-county internal migration - through a Python/PostgreSQL pipeline and a Dash/Leaflet web application built on top of them.
 
 This project was developed with the assistance of Claude Code.
 
@@ -21,16 +21,17 @@ Python / pandas
    ▼
 PostgreSQL
    │
-   ├── SQL queries
+   ▼
+SQL queries (queries.py)
    │
    ▼
-Analysis
+Plotly figures (visualisation.py)
    │
    ▼
-Interactive Dash app
+Interactive Dash app (app.py)
 ```
 
-The current dataset contains monthly population data by Swedish municipality, age group and sex.
+The current dataset contains monthly population data by Swedish municipality, age group and sex, plus annual county-to-county migration flows by sex.
 
 The project also includes municipality geometry data in GeoJSON format, which is used to connect population data to geographic locations.
 
@@ -58,11 +59,14 @@ scb-project/
 │   └── layout.css
 ├── data/
 │   └── municipalities.geojson
+├── docs/
+│   └── demo.gif
 ├── src/
 │   └── scb_data/
 │       ├── database.py
 │       ├── geography.py
 │       ├── jsonstat.py
+│       ├── migration.py
 │       ├── population.py
 │       ├── queries.py
 │       ├── scb_api.py
@@ -72,6 +76,7 @@ scb-project/
 │   ├── test_database.py
 │   ├── test_geography.py
 │   ├── test_jsonstat.py
+│   ├── test_migration.py
 │   ├── test_population.py
 │   ├── test_queries.py
 │   ├── test_scb_api.py
@@ -86,19 +91,20 @@ scb-project/
 
 ## Data source
 
-The population data is retrieved from Statistics Sweden (SCB) using the PxWeb API.
+Both datasets are retrieved from Statistics Sweden (SCB) using the PxWeb API. The pipeline uses two of SCB's tables:
 
-The current pipeline uses SCB's table:
+* **Population per month by region, age and sex** - monthly observations covering every Swedish municipality.
+* **Internal migration between counties by sex and county** - annual county-to-county moves, used by the app's Migration tab.
 
-**Population per month by region, age and sex**
-
-The data covers Swedish municipalities and monthly observations.
-
-Municipality geometry is stored separately as GeoJSON and is used to connect the population data to geographic locations through municipality codes.
+Municipality geometry (`data/municipalities.geojson`) comes from a separate source: [okfse/sweden-geojson](https://github.com/okfse/sweden-geojson/tree/master). It's stored separately from the SCB data and is used to connect population/migration figures to geographic locations through municipality and county codes.
 
 ## Interactive application
 
-`app.py` is a Dash application for exploring the population data geographically: pan a borders-only map of Sweden to pick a location and radius (or switch to whole counties), then explore that area across three tabs - a population pyramid animated across every year of available data, a population trend chart with a growth-rate projection a few years out, and a Migration tab showing who moved to or from the selected area as a Sankey diagram (switching to this tab automatically selects county level, since migration data is only available at that granularity).
+`app.py` is a Dash application for exploring the population data geographically: pan a borders-only map of Sweden to pick a location and radius (or switch to whole counties), then explore that area across three tabs:
+
+* **Population Pyramid** - population by age group and sex, animated across every year of available data.
+* **Population Over Time** - a population trend line with a growth-rate projection a few years out.
+* **Migration** - who moved to or from the selected area as a Sankey diagram, with a "Moved to"/"Moved from" toggle. Switching to this tab automatically selects county level, since migration data is only available at that granularity.
 
 Run it locally with:
 
@@ -146,7 +152,7 @@ pip install -r requirements.txt
 python run_pipeline.py
 ```
 
-This retrieves the configured SCB population data, transforms it, and loads it into PostgreSQL.
+This retrieves the configured SCB population and migration data, transforms it, and loads it into PostgreSQL.
 
 ### 4. Run the interactive app
 
@@ -194,10 +200,10 @@ The project currently provides:
 * An interactive, borders-only map (no street tiles, restricted to Sweden) with a fixed-center selection point and a log-scale radius ring (1-2000 km)
 * Radius-based municipality lookup (representative-point distance, with an exact point-in-polygon fallback), highlighted directly on the map
 * A municipality/county level selector, grouping the radius search up to whole counties
-* A population pyramid (male/female by age group) for the selected area
+* A **Population Pyramid** tab (male/female by age group) for the selected area
 * A year slider with play/pause, animating through 2000-2024
-* A population trend tab with a compound-growth-rate projection a few years beyond the available data
-* A Migration tab showing county-to-county migration flows as a Sankey diagram, with a "moved to"/"moved from" toggle
+* A **Population Over Time** tab with a compound-growth-rate projection a few years beyond the available data
+* A **Migration** tab showing county-to-county migration flows as a Sankey diagram, with a "Moved to"/"Moved from" toggle
 * Unit and database integration tests
 * Docker-based test execution
 * GitHub Actions CI

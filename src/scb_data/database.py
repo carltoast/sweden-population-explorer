@@ -6,12 +6,18 @@ import pandas as pd
 import psycopg
 
 
-def get_connection() -> psycopg.Connection:
+def get_connection(dbname: str | None = None) -> psycopg.Connection:
     """Open a new connection to the population Postgres database.
 
     Connection parameters are read from the POSTGRES_HOST/PORT/DB/USER/
     PASSWORD environment variables, defaulting to the local Docker
     Compose values.
+
+    Args:
+        dbname: Database to connect to, overriding POSTGRES_DB. Only
+            needed to reach a database other than the pipeline's own
+            (the test suite uses it to reach "postgres" and create
+            scb_test from there).
 
     Returns:
         An open psycopg connection.
@@ -19,7 +25,7 @@ def get_connection() -> psycopg.Connection:
     return psycopg.connect(
         host=os.getenv("POSTGRES_HOST", "localhost"),
         port=os.getenv("POSTGRES_PORT", "5432"),
-        dbname=os.getenv("POSTGRES_DB", "scb"),
+        dbname=dbname or os.getenv("POSTGRES_DB", "scb"),
         user=os.getenv("POSTGRES_USER", "scb"),
         password=os.getenv("POSTGRES_PASSWORD", "development"),
     )
